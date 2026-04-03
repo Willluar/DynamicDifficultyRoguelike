@@ -7,7 +7,6 @@ public class RunDataLogger : MonoBehaviour
 
     private RunData currentRun;
     private StageData currentStage;
-
     private string filePath;
 
     private void Awake()
@@ -19,7 +18,10 @@ public class RunDataLogger : MonoBehaviour
         Debug.Log("RunDataLogger saving to: " + filePath);
     }
 
-    /* ---------------- Run Lifecycle ---------------- */
+    public string GetSavePath()
+    {
+        return filePath;
+    }
 
     public void StartRun(int runID, string buildID)
     {
@@ -37,18 +39,15 @@ public class RunDataLogger : MonoBehaviour
     {
         if (currentRun == null) return;
 
-        // close out the current stage as "failed stage" stats are still useful
         FinaliseCurrentStage();
-
         currentRun.timestampEnd = System.DateTime.UtcNow.ToString("o");
         SaveRunToJson(currentRun);
 
         Debug.Log("Run saved to: " + filePath);
+
         currentRun = null;
         currentStage = null;
     }
-
-    /* ---------------- Stage Lifecycle ---------------- */
 
     public void StartStage(int stageIndex)
     {
@@ -60,37 +59,36 @@ public class RunDataLogger : MonoBehaviour
         };
     }
 
-    // Call when all enemies are defeated
-    public void CompleteStageAndAdvance(DifficultySnapshot difficultyForStage)
+    public void SetCurrentStageDifficulty(float healthMult, float damageMult, int enemyCount)
+    {
+        if (currentStage == null) return;
+
+        currentStage.enemyHealthMultiplier = healthMult;
+        currentStage.enemyDamageMultiplier = damageMult;
+        currentStage.enemyCount = enemyCount;
+    }
+
+    public void CompleteStage()
     {
         if (currentRun == null || currentStage == null) return;
 
         currentRun.stagesCleared++;
-
-        currentStage.difficulty = difficultyForStage;
         currentRun.stages.Add(currentStage);
-
-        // Start next stage
-        StartStage(currentRun.stagesCleared + 1);
     }
 
     private void FinaliseCurrentStage()
     {
-        // Only add it if it's not already in the list
-        // (If you die mid-stage, we still want the partial stats)
         if (currentRun == null || currentStage == null) return;
 
-        // Don’t double-add if it already exists (safety)
         bool alreadyAdded = currentRun.stages.Exists(s => s.stageIndex == currentStage.stageIndex);
         if (!alreadyAdded)
             currentRun.stages.Add(currentStage);
     }
 
-    /* ---------------- Metrics ---------------- */
-
     public void RecordTurn()
     {
         if (currentRun == null || currentStage == null) return;
+
         currentRun.totalTurns++;
         currentStage.stageTurns++;
     }
@@ -98,6 +96,7 @@ public class RunDataLogger : MonoBehaviour
     public void AddDamageDealt(int amount)
     {
         if (currentRun == null || currentStage == null) return;
+
         currentRun.totalDamageDealt += amount;
         currentStage.stageDamageDealt += amount;
     }
@@ -105,6 +104,7 @@ public class RunDataLogger : MonoBehaviour
     public void AddDamageTaken(int amount)
     {
         if (currentRun == null || currentStage == null) return;
+
         currentRun.totalDamageTaken += amount;
         currentStage.stageDamageTaken += amount;
     }
@@ -112,11 +112,80 @@ public class RunDataLogger : MonoBehaviour
     public void AddEnemyKill()
     {
         if (currentRun == null || currentStage == null) return;
+
         currentRun.totalEnemiesKilled++;
         currentStage.stageEnemiesKilled++;
     }
 
-    /* ---------------- JSON IO ---------------- */
+    public void RecordSpellCast(DamageType damageType)
+    {
+        if (currentRun == null || currentStage == null) return;
+
+        switch (damageType)
+        {
+            case DamageType.Melee:
+                currentRun.meleeCasts++;
+                currentStage.meleeCasts++;
+                break;
+            case DamageType.Fire:
+                currentRun.fireCasts++;
+                currentStage.fireCasts++;
+                break;
+            case DamageType.Ice:
+                currentRun.iceCasts++;
+                currentStage.iceCasts++;
+                break;
+            case DamageType.Lightning:
+                currentRun.lightningCasts++;
+                currentStage.lightningCasts++;
+                break;
+        }
+    }
+
+    public void SetDDAEnabled(bool enabled)
+    {
+        if (currentRun != null)
+            currentRun.ddaEnabled = enabled;
+    }
+
+    public void RecordDamageByType(DamageType damageType, int amount)
+    {
+        if (currentRun == null || currentStage == null) return;
+
+        switch (damageType)
+        {
+            case DamageType.Melee:
+                currentRun.meleeDamage += amount;
+                currentStage.meleeDamage += amount;
+                break;
+            case DamageType.Fire:
+                currentRun.fireDamage += amount;
+                currentStage.fireDamage += amount;
+                break;
+            case DamageType.Ice:
+                currentRun.iceDamage += amount;
+                currentStage.iceDamage += amount;
+                break;
+            case DamageType.Lightning:
+                currentRun.lightningDamage += amount;
+                currentStage.lightningDamage += amount;
+                break;
+        }
+    }
+
+    public RunDataCollection LoadRunData()
+    {
+        if (!File.Exists(filePath))
+            return new RunDataCollection();
+
+        string json = File.ReadAllText(filePath);
+
+        if (string.IsNullOrWhiteSpace(json))
+            return new RunDataCollection();
+
+        RunDataCollection collection = JsonUtility.FromJson<RunDataCollection>(json);
+        return collection ?? new RunDataCollection();
+    }
 
     private void SaveRunToJson(RunData run)
     {

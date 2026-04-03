@@ -3,25 +3,46 @@ using UnityEngine;
 
 public class EnemyGridMovement : MonoBehaviour
 {
-    public int attackDamage = 1;
+    public int attackDamage = 25;
+    public int baseAttackDamage = 25;
 
     private Transform player;
 
     private void Start()
     {
-        GridManager.Instance.Register(gameObject);
-        TurnManager.Instance.RegisterEnemy(this);
+        if (GridManager.Instance != null)
+            GridManager.Instance.Register(gameObject);
 
-        player = GameObject.FindGameObjectWithTag("Player").transform;
-        GameManager.Instance.RegisterEnemy(gameObject);
+        if (TurnManager.Instance != null)
+            TurnManager.Instance.RegisterEnemy(this);
+
+        if (GameManager.Instance != null)
+            attackDamage = Mathf.RoundToInt(baseAttackDamage * GameManager.Instance.currentEnemyDamageMultiplier);
+
+        GameObject playerObj = GameObject.FindGameObjectWithTag("Player");
+        if (playerObj != null)
+            player = playerObj.transform;
+
+        if (GameManager.Instance != null)
+            GameManager.Instance.RegisterEnemy(gameObject);
 
         PlayerSpellController spellController = FindFirstObjectByType<PlayerSpellController>();
         if (spellController != null)
             spellController.RefreshValidTargets();
     }
 
+    public void InitialiseEnemyDamage()
+    {
+        if (GameManager.Instance == null)
+            return;
+
+        attackDamage = Mathf.RoundToInt(baseAttackDamage * GameManager.Instance.currentEnemyDamageMultiplier);
+    }
     public void TakeTurn()
     {
+        if (player == null || GridManager.Instance == null)
+            return;
+
         Vector2Int enemyGrid = GridManager.Instance.WorldToGrid(transform.position);
         Vector2Int playerGrid = GridManager.Instance.WorldToGrid(player.position);
 
@@ -35,7 +56,7 @@ public class EnemyGridMovement : MonoBehaviour
         if (GridManager.Instance.IsTileOccupied(nextStep))
         {
             GameObject occupant = GridManager.Instance.GetOccupant(nextStep);
-            Health health = occupant.GetComponent<Health>();
+            Health health = occupant != null ? occupant.GetComponent<Health>() : null;
 
             if (health != null)
                 health.TakeDamage(attackDamage);

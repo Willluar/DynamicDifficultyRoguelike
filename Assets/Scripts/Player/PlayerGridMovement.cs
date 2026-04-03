@@ -4,7 +4,7 @@ using UnityEngine.InputSystem;
 public class PlayerGridMovement : MonoBehaviour
 {
     [Header("Combat")]
-    public int attackDamage = 2;
+    public int attackDamage = 50;
 
     private PlayerInputActions inputActions;
     private Vector2 input;
@@ -28,12 +28,16 @@ public class PlayerGridMovement : MonoBehaviour
 
     private void Start()
     {
-        GridManager.Instance.Register(gameObject);
+        if (GridManager.Instance != null)
+            GridManager.Instance.Register(gameObject);
     }
 
     private void Update()
     {
-        if (!TurnManager.Instance.IsPlayerTurn())
+        if (GameManager.Instance != null && GameManager.Instance.IsGameOver)
+            return;
+
+        if (TurnManager.Instance == null || !TurnManager.Instance.IsPlayerTurn())
             return;
 
         Vector2Int direction = GetCardinalDirection(input);
@@ -41,7 +45,7 @@ public class PlayerGridMovement : MonoBehaviour
         if (direction != Vector2Int.zero)
         {
             AttemptMove(direction);
-            input = Vector2.zero; // prevent repeat moves
+            input = Vector2.zero;
         }
     }
 
@@ -57,6 +61,9 @@ public class PlayerGridMovement : MonoBehaviour
 
     private void AttemptMove(Vector2Int direction)
     {
+        if (GridManager.Instance == null)
+            return;
+
         Vector2Int currentGrid = GridManager.Instance.WorldToGrid(transform.position);
         Vector2Int targetGrid = currentGrid + direction;
 
@@ -67,24 +74,34 @@ public class PlayerGridMovement : MonoBehaviour
         {
             GameObject occupant = GridManager.Instance.GetOccupant(targetGrid);
 
-            // Only treat it as an attack if the occupant is an enemy (has EnemyGridMovement)
-            EnemyGridMovement enemy = occupant.GetComponent<EnemyGridMovement>();
-            Health enemyHealth = occupant.GetComponent<Health>();
+            EnemyGridMovement enemy = occupant != null ? occupant.GetComponent<EnemyGridMovement>() : null;
+            Health enemyHealth = occupant != null ? occupant.GetComponent<Health>() : null;
 
             if (enemy != null && enemyHealth != null)
             {
                 enemyHealth.TakeDamage(attackDamage);
 
-                // Log damage dealt by the player
                 if (RunDataLogger.Instance != null)
+                {
+                    RunDataLogger.Instance.RecordSpellCast(DamageType.Melee);
+                    RunDataLogger.Instance.RecordDamageByType(DamageType.Melee, attackDamage);
                     RunDataLogger.Instance.AddDamageDealt(attackDamage);
+                }
+
+                if (GameManager.Instance == null || !GameManager.Instance.ConsumeSkipPlayerEndTurnFlag())
+                {
+                    if (TurnManager.Instance != null)
+                        TurnManager.Instance.EndPlayerTurn();
+                }
             }
 
-            TurnManager.Instance.EndPlayerTurn();
+            // Occupied by wall or other blocker = do nothing, do not spend turn
             return;
         }
 
         GridManager.Instance.Move(gameObject, targetGrid);
-        TurnManager.Instance.EndPlayerTurn();
+
+        if (TurnManager.Instance != null)
+            TurnManager.Instance.EndPlayerTurn();
     }
 }

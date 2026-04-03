@@ -10,20 +10,19 @@ public class PlayerSpellController : MonoBehaviour
     public SpellData lightningBolt;
     public SpellData fireball;
 
-    private SpellData currentSpell;
-
-    private List<EnemyGridMovement> validTargets = new List<EnemyGridMovement>();
-    private int currentTargetIndex = -1;
-
-    private bool isCasting = false;
     [Header("UI")]
     public SpellUIController spellUI;
+
+    private SpellData currentSpell;
+    private List<EnemyGridMovement> validTargets = new List<EnemyGridMovement>();
+    private int currentTargetIndex = -1;
+    private bool isCasting = false;
 
     private void Start()
     {
         currentSpell = iceBolt;
 
-        if (spellUI != null)
+        if (spellUI != null && currentSpell != null)
             spellUI.SetSelectedSpell(currentSpell.spellType);
 
         RefreshValidTargets();
@@ -31,7 +30,10 @@ public class PlayerSpellController : MonoBehaviour
 
     private void Update()
     {
-        if (!TurnManager.Instance.IsPlayerTurn())
+        if (GameManager.Instance != null && GameManager.Instance.IsGameOver)
+            return;
+
+        if (TurnManager.Instance == null || !TurnManager.Instance.IsPlayerTurn())
             return;
 
         if (isCasting)
@@ -65,9 +67,9 @@ public class PlayerSpellController : MonoBehaviour
             spellChanged = true;
         }
 
-        if(spellChanged)
-{
-            if (spellUI != null)
+        if (spellChanged)
+        {
+            if (spellUI != null && currentSpell != null)
                 spellUI.SetSelectedSpell(currentSpell.spellType);
 
             RefreshValidTargets();
@@ -97,6 +99,9 @@ public class PlayerSpellController : MonoBehaviour
         ClearAllHighlights();
         validTargets.Clear();
         currentTargetIndex = -1;
+
+        if (currentSpell == null || GridManager.Instance == null)
+            return;
 
         EnemyGridMovement[] allEnemies = FindObjectsByType<EnemyGridMovement>(FindObjectsSortMode.None);
         Vector2Int playerGrid = GridManager.Instance.WorldToGrid(transform.position);
@@ -170,6 +175,9 @@ public class PlayerSpellController : MonoBehaviour
 
     private IEnumerator CastCurrentSpellRoutine()
     {
+        if (currentSpell == null)
+            yield break;
+
         if (validTargets.Count == 0 || currentTargetIndex < 0 || currentTargetIndex >= validTargets.Count)
             yield break;
 
@@ -180,6 +188,9 @@ public class PlayerSpellController : MonoBehaviour
             RefreshValidTargets();
             yield break;
         }
+
+        if (RunDataLogger.Instance != null)
+            RunDataLogger.Instance.RecordSpellCast(currentSpell.damageType);
 
         isCasting = true;
         ClearAllHighlights();
@@ -217,14 +228,18 @@ public class PlayerSpellController : MonoBehaviour
         while (!hitResolved)
             yield return null;
 
-        TurnManager.Instance.EndPlayerTurn();
+        bool skipTurn = GameManager.Instance != null && GameManager.Instance.ConsumeSkipPlayerEndTurnFlag();
+
+        if (!skipTurn && TurnManager.Instance != null)
+            TurnManager.Instance.EndPlayerTurn();
+
         RefreshValidTargets();
         isCasting = false;
     }
 
     private void ResolveSpellEffect(EnemyGridMovement target)
     {
-        if (target == null)
+        if (target == null || currentSpell == null)
             return;
 
         Vector3 impactPos = target.transform.position;
@@ -254,32 +269,31 @@ public class PlayerSpellController : MonoBehaviour
         }
     }
 
+    private void ApplySpellDamage(Health health, int amount)
+    {
+        if (health == null || currentSpell == null)
+            return;
+
+        health.TakeDamage(amount);
+
+        if (RunDataLogger.Instance != null)
+        {
+            RunDataLogger.Instance.AddDamageDealt(amount);
+            RunDataLogger.Instance.RecordDamageByType(currentSpell.damageType, amount);
+        }
+    }
+
     private void CastIceBolt(EnemyGridMovement target)
     {
-        Health health = target.GetComponent<Health>();
-        if (health != null)
-        {
-            health.TakeDamage(currentSpell.damage);
-
-            if (RunDataLogger.Instance != null)
-                RunDataLogger.Instance.AddDamageDealt(currentSpell.damage);
-        }
+        ApplySpellDamage(target.GetComponent<Health>(), currentSpell.damage);
     }
 
     private void CastLightningBolt(EnemyGridMovement primaryTarget)
     {
         List<EnemyGridMovement> hitTargets = new List<EnemyGridMovement>();
 
-        Health primaryHealth = primaryTarget.GetComponent<Health>();
-        if (primaryHealth != null)
-        {
-            primaryHealth.TakeDamage(currentSpell.damage);
-
-            if (RunDataLogger.Instance != null)
-                RunDataLogger.Instance.AddDamageDealt(currentSpell.damage);
-
-            hitTargets.Add(primaryTarget);
-        }
+        ApplySpellDamage(primaryTarget.GetComponent<Health>(), currentSpell.damage);
+        hitTargets.Add(primaryTarget);
 
         EnemyGridMovement[] allEnemies = FindObjectsByType<EnemyGridMovement>(FindObjectsSortMode.None);
 
@@ -296,27 +310,18 @@ public class PlayerSpellController : MonoBehaviour
 
             if (distance <= currentSpell.chainRange)
             {
-                Health health = enemy.GetComponent<Health>();
-                if (health != null)
+                ApplySpellDamage(enemy.GetComponent<Health>(), currentSpell.damage);
+
+                if (currentSpell.secondaryEffectPrefab != null)
                 {
-                    health.TakeDamage(currentSpell.damage);
+                    GameObject chainEffect = Instantiate(currentSpell.secondaryEffectPrefab);
+                    SpellEffectVisual visual = chainEffect.GetComponent<SpellEffectVisual>();
 
-                    if (RunDataLogger.Instance != null)
-                        RunDataLogger.Instance.AddDamageDealt(currentSpell.damage);
-
-                    if (currentSpell.secondaryEffectPrefab != null)
-                    {
-                        GameObject chainEffect = Instantiate(currentSpell.secondaryEffectPrefab);
-                        SpellEffectVisual visual = chainEffect.GetComponent<SpellEffectVisual>();
-
-                        if (visual != null)
-                        {
-                            visual.PlayBetweenPoints(primaryTarget.transform.position, enemy.transform.position);
-                        }
-                    }
-
-                    chainsDone++;
+                    if (visual != null)
+                        visual.PlayBetweenPoints(primaryTarget.transform.position, enemy.transform.position);
                 }
+
+                chainsDone++;
             }
 
             if (chainsDone >= currentSpell.chainCount)
@@ -337,7 +342,7 @@ public class PlayerSpellController : MonoBehaviour
             if (visual != null)
             {
                 float scaleMultiplier = 1f + (currentSpell.splashRadius * 0.5f);
-                visual.PlayAtPoint(target.transform.position, scaleMultiplier); 
+                visual.PlayAtPoint(target.transform.position, scaleMultiplier);
             }
         }
 
@@ -349,16 +354,7 @@ public class PlayerSpellController : MonoBehaviour
             int distance = Mathf.Abs(enemyGrid.x - targetGrid.x) + Mathf.Abs(enemyGrid.y - targetGrid.y);
 
             if (distance <= currentSpell.splashRadius)
-            {
-                Health health = enemy.GetComponent<Health>();
-                if (health != null)
-                {
-                    health.TakeDamage(currentSpell.damage);
-
-                    if (RunDataLogger.Instance != null)
-                        RunDataLogger.Instance.AddDamageDealt(currentSpell.damage);
-                }
-            }
+                ApplySpellDamage(enemy.GetComponent<Health>(), currentSpell.damage);
         }
     }
 

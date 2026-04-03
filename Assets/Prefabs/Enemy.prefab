@@ -125,7 +125,7 @@ RectTransform:
   m_AnchorMin: {x: 0.5, y: 0.5}
   m_AnchorMax: {x: 0.5, y: 0.5}
   m_AnchoredPosition: {x: 0, y: 0.8}
-  m_SizeDelta: {x: 2, y: 1}
+  m_SizeDelta: {x: 3, y: 1}
   m_Pivot: {x: 0.5, y: 0.5}
 --- !u!23 &6255159166421740451
 MeshRenderer:
@@ -409,7 +409,8 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: df244b3ea43336a46be5940697fc90f9, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::EnemyGridMovement
-  attackDamage: 1
+  attackDamage: 25
+  baseAttackDamage: 25
 --- !u!61 &5720405366432021690
 BoxCollider2D:
   m_ObjectHideFlags: 0
@@ -468,10 +469,12 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: f1570a949396e5f499e06306c13079a8, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::Health
-  maxHealth: 4
-  currentHealth: 4
+  maxHealth: 100
+  currentHealth: 100
   healthText: {fileID: 0}
   healthWorldText: {fileID: 0}
+  isEnemy: 1
+  baseMaxHealth: 100
 --- !u!114 &608579086875095443
 MonoBehaviour:
   m_ObjectHideFlags: 0

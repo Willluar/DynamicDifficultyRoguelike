@@ -20,8 +20,6 @@ public class TurnManager : MonoBehaviour
             Destroy(gameObject);
     }
 
-    /* ---------------- Enemy Registration ---------------- */
-
     public void RegisterEnemy(EnemyGridMovement enemy)
     {
         if (!enemies.Contains(enemy))
@@ -38,8 +36,6 @@ public class TurnManager : MonoBehaviour
     {
         enemies.Clear();
     }
-
-    /* ---------------- Turn Flow ---------------- */
 
     public bool IsPlayerTurn()
     {
@@ -60,6 +56,7 @@ public class TurnManager : MonoBehaviour
         if (enemyTurnRoutine != null)
             StopCoroutine(enemyTurnRoutine);
 
+        enemyTurnRoutine = null;
         currentTurn = TurnState.PlayerTurn;
     }
 
@@ -76,7 +73,11 @@ public class TurnManager : MonoBehaviour
             enemies[i].TakeTurn();
             yield return new WaitForSeconds(0.2f);
         }
-        RunDataLogger.Instance.RecordTurn();
+
+        if (RunDataLogger.Instance != null)
+            RunDataLogger.Instance.RecordTurn();
+
+        enemyTurnRoutine = null;
         currentTurn = TurnState.PlayerTurn;
     }
 }

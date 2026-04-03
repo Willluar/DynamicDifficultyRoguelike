@@ -15,6 +15,18 @@ public class RunData
     public int totalDamageTaken;
     public int totalEnemiesKilled;
 
+    public bool ddaEnabled;
+
+    public int meleeCasts;
+    public int fireCasts;
+    public int iceCasts;
+    public int lightningCasts;
+
+    public int meleeDamage;
+    public int fireDamage;
+    public int iceDamage;
+    public int lightningDamage;
+
     public string buildID;
 
     public List<StageData> stages = new List<StageData>();
@@ -29,6 +41,20 @@ public class StageData
     public int stageDamageDealt;
     public int stageDamageTaken;
     public int stageEnemiesKilled;
+
+    public float enemyHealthMultiplier;
+    public float enemyDamageMultiplier;
+    public int enemyCount;
+
+    public int meleeCasts;
+    public int fireCasts;
+    public int iceCasts;
+    public int lightningCasts;
+
+    public int meleeDamage;
+    public int fireDamage;
+    public int iceDamage;
+    public int lightningDamage;
 
     public DifficultySnapshot difficulty;
 }

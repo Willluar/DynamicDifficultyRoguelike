@@ -8,33 +8,48 @@ public class Health : MonoBehaviour
     public int currentHealth;
 
     [Header("UI")]
-    public TextMeshProUGUI healthText;   // Optional: player UI
-    public TextMeshPro healthWorldText;  // Optional: enemy world text
+    public TextMeshProUGUI healthText;
+    public TextMeshPro healthWorldText;
 
     private TextMeshPro worldText;
 
+    [Header("Enemy Scaling")]
+    public bool isEnemy = false;
+    public int baseMaxHealth = 100;
+
     private void Awake()
     {
-        Debug.Log("Player HP: " + currentHealth);
-        currentHealth = maxHealth;
         worldText = GetComponentInChildren<TextMeshPro>();
+        currentHealth = maxHealth;
         UpdateHealthUI();
     }
-    private void Update()
+
+    public void InitialiseEnemyHealth()
     {
+        if (!isEnemy || GameManager.Instance == null)
+            return;
+
+        maxHealth = Mathf.RoundToInt(baseMaxHealth * GameManager.Instance.currentEnemyHealthMultiplier);
+        currentHealth = maxHealth;
+
         UpdateHealthUI();
     }
+
+    public void ResetForNewRun()
+    {
+        currentHealth = maxHealth;
+        UpdateHealthUI();
+    }
+
     public void TakeDamage(int damage)
     {
-
         currentHealth -= damage;
         currentHealth = Mathf.Clamp(currentHealth, 0, maxHealth);
 
-        // Log damage taken only for player
         if (CompareTag("Player") && RunDataLogger.Instance != null)
             RunDataLogger.Instance.AddDamageTaken(damage);
 
-       
+        UpdateHealthUI();
 
         if (currentHealth <= 0)
             Die();
@@ -51,7 +66,6 @@ public class Health : MonoBehaviour
 
     private void Die()
     {
-        // PLAYER DEATH: end run + end game, do NOT destroy player
         if (CompareTag("Player"))
         {
             if (RunDataLogger.Instance != null)
@@ -63,20 +77,21 @@ public class Health : MonoBehaviour
             if (GameManager.Instance != null)
                 GameManager.Instance.PlayerDied();
 
-            // Disable player so nothing else can interact with it
-            var move = GetComponent<PlayerGridMovement>();
+            PlayerGridMovement move = GetComponent<PlayerGridMovement>();
             if (move != null) move.enabled = false;
 
-            var col = GetComponent<Collider2D>();
+            PlayerSpellController spell = GetComponent<PlayerSpellController>();
+            if (spell != null) spell.enabled = false;
+
+            Collider2D col = GetComponent<Collider2D>();
             if (col != null) col.enabled = false;
 
-            var sr = GetComponent<SpriteRenderer>();
+            SpriteRenderer sr = GetComponent<SpriteRenderer>();
             if (sr != null) sr.enabled = false;
 
             return;
         }
 
-        // ENEMY DEATH: unregister systems + log kill + destroy
         EnemyGridMovement enemy = GetComponent<EnemyGridMovement>();
         if (enemy != null)
         {
@@ -92,6 +107,10 @@ public class Health : MonoBehaviour
 
         if (GridManager.Instance != null)
             GridManager.Instance.Unregister(gameObject);
+
+        PlayerSpellController spellController = FindFirstObjectByType<PlayerSpellController>();
+        if (spellController != null)
+            spellController.RefreshValidTargets();
 
         Destroy(gameObject);
     }

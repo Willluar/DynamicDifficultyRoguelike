@@ -6,6 +6,9 @@ public class GameManager : MonoBehaviour
 {
     public static GameManager Instance;
 
+    [Header("Mode")]
+    public bool useDDA = false;
+
     [Header("Run State")]
     public int currentRun = 0;
     public bool runActive = false;
@@ -18,7 +21,27 @@ public class GameManager : MonoBehaviour
     public GameObject enemyPrefab;
     public List<Vector2Int> enemySpawnGridPositions = new List<Vector2Int>();
 
+    [Header("Stage Progression")]
+    public int currentStage = 1;
+
+    [Header("Base Enemy Scaling")]
+    public float baseEnemyHealthMultiplier = 1f;
+    public float baseEnemyDamageMultiplier = 1f;
+    public int baseEnemyCount = 3;
+
+    [Header("Per-Stage Scaling")]
+    public float healthIncreasePerStage = 0.1f;
+    public float damageIncreasePerStage = 0.05f;
+    public int extraEnemyEveryXStages = 2;
+
+    [HideInInspector] public float currentEnemyHealthMultiplier = 1f;
+    [HideInInspector] public float currentEnemyDamageMultiplier = 1f;
+    [HideInInspector] public int currentEnemyCount = 3;
+
     private readonly List<GameObject> activeEnemies = new List<GameObject>();
+    private bool skipPlayerEndTurnOnce = false;
+
+    public bool IsGameOver => gameOver;
 
     private void Awake()
     {
@@ -26,21 +49,27 @@ public class GameManager : MonoBehaviour
         else Destroy(gameObject);
     }
 
-    private void Start()
+    
+
+    private IEnumerator Start()
     {
+        yield return null; // Let singletons finish Awake first
         StartRun();
     }
 
     public void StartRun()
     {
-        RunDataLogger.Instance.StartRun(currentRun, "DefaultBuild");
         currentRun++;
+        currentStage = 1;
         runActive = true;
         gameOver = false;
+        skipPlayerEndTurnOnce = false;
 
-        Debug.Log("Run Started: " + currentRun);
+        if (useDDA && DynamicDifficultyManager.Instance != null)
+            DynamicDifficultyManager.Instance.LoadAndProcessRunData();
 
-        // Reset turn system and grid occupancy
+        UpdateStageScaling();
+
         if (TurnManager.Instance != null)
         {
             TurnManager.Instance.ClearEnemies();
@@ -50,63 +79,94 @@ public class GameManager : MonoBehaviour
         if (GridManager.Instance != null)
             GridManager.Instance.ClearOccupancy();
 
-        // Destroy any leftover enemies from previous run
         CleanupEnemies();
+        PreparePlayerForNewRun();
 
-        // Reset player properly via grid
-        ResetPlayer();
+        if (RunDataLogger.Instance != null)
+        {
+            RunDataLogger.Instance.StartRun(currentRun, "DefaultBuild");
+            RunDataLogger.Instance.SetDDAEnabled(useDDA);
+        }
 
-        // Spawn new enemies
         SpawnEnemies();
+
+        PlayerSpellController spellController = FindFirstObjectByType<PlayerSpellController>();
+        if (spellController != null)
+            spellController.RefreshValidTargets();
+
+        Debug.Log("Run Started: " + currentRun);
     }
 
     public void EndRun(bool win)
     {
         runActive = false;
-
-        
-
         Debug.Log("Run Ended. Win: " + win);
-
-        if (win)
-
-            StartCoroutine(StartNextRunDelay());
-        else
-            Debug.Log("Game Over");
     }
 
-    private IEnumerator StartNextRunDelay()
+    public bool ConsumeSkipPlayerEndTurnFlag()
     {
-        yield return new WaitForSeconds(1f);
-        StartRun();
+        bool value = skipPlayerEndTurnOnce;
+        skipPlayerEndTurnOnce = false;
+        return value;
     }
-
-    /* ---------------- Enemy Management ---------------- */
 
     public void RegisterEnemy(GameObject enemy)
     {
-        if (!activeEnemies.Contains(enemy))
+        if (enemy != null && !activeEnemies.Contains(enemy))
             activeEnemies.Add(enemy);
     }
 
     public void UnregisterEnemy(GameObject enemy)
     {
-        activeEnemies.Remove(enemy);
+        if (enemy != null)
+            activeEnemies.Remove(enemy);
 
-        if (activeEnemies.Count == 0 && runActive)
-            EndRun(true);
+        if (activeEnemies.Count == 0 && runActive && !gameOver)
+            HandleStageClear();
+    }
+
+    private void HandleStageClear()
+    {
+        skipPlayerEndTurnOnce = true;
+
+        if (RunDataLogger.Instance != null)
+        {
+            RunDataLogger.Instance.SetCurrentStageDifficulty(
+                currentEnemyHealthMultiplier,
+                currentEnemyDamageMultiplier,
+                currentEnemyCount
+            );
+
+            RunDataLogger.Instance.CompleteStage();
+        }
+
+        currentStage++;
+        UpdateStageScaling();
+
+        if (TurnManager.Instance != null)
+            TurnManager.Instance.ResetTurns();
+
+        MovePlayerToStageStart();
+
+        if (RunDataLogger.Instance != null)
+            RunDataLogger.Instance.StartStage(currentStage);
+
+        SpawnEnemies();
+
+        PlayerSpellController spellController = FindFirstObjectByType<PlayerSpellController>();
+        if (spellController != null)
+            spellController.RefreshValidTargets();
     }
 
     private void CleanupEnemies()
     {
-        // Destroy tracked enemies
         foreach (var e in activeEnemies)
         {
             if (e != null) Destroy(e);
         }
+
         activeEnemies.Clear();
 
-        // Extra safety: destroy any untracked enemies in scene
         foreach (var enemy in GameObject.FindGameObjectsWithTag("Enemy"))
         {
             Destroy(enemy);
@@ -115,44 +175,90 @@ public class GameManager : MonoBehaviour
 
     private void SpawnEnemies()
     {
-        foreach (var gridPos in enemySpawnGridPositions)
+        if (GridManager.Instance == null || enemyPrefab == null)
+            return;
+
+        int enemiesToSpawn = Mathf.Min(currentEnemyCount, enemySpawnGridPositions.Count);
+
+        for (int i = 0; i < enemiesToSpawn; i++)
         {
+            Vector2Int gridPos = enemySpawnGridPositions[i];
+
             if (!GridManager.Instance.IsInsideGrid(gridPos))
                 continue;
 
-            GameObject enemy = Instantiate(enemyPrefab, GridManager.Instance.GridToWorld(gridPos), Quaternion.identity);
-
-            // Ensure tag is set for cleanup
+            GameObject enemy = Instantiate(
+                enemyPrefab,
+                GridManager.Instance.GridToWorld(gridPos),
+                Quaternion.identity
+            );
             enemy.tag = "Enemy";
 
-            // Register into systems immediately (don’t wait for Start timing)
+            Health health = enemy.GetComponent<Health>();
+            if (health != null)
+            {
+                health.InitialiseEnemyHealth();
+                
+            }
+
+            EnemyGridMovement enemyMove = enemy.GetComponent<EnemyGridMovement>();
+            if (enemyMove != null)
+            {
+                enemyMove.InitialiseEnemyDamage();
+            }
+            
+
             GridManager.Instance.Register(enemy);
             RegisterEnemy(enemy);
         }
     }
 
-    /* ---------------- Player Management ---------------- */
-
-    private void ResetPlayer()
+    private void PreparePlayerForNewRun()
     {
-        // Move player using the grid system
-        GridManager.Instance.Move(player, playerSpawnGridPos);
+        if (player == null || GridManager.Instance == null)
+            return;
 
-        // Reset player health
+        GridManager.Instance.Move(player, playerSpawnGridPos);
+        GridManager.Instance.Register(player);
+
         Health playerHealth = player.GetComponent<Health>();
         if (playerHealth != null)
-        {
-            playerHealth.currentHealth = playerHealth.maxHealth;
-            // If you have UI updating in Health, call it here if needed
-            // playerHealth.ForceRefreshUI(); (only if you add such a method)
-        }
+            playerHealth.ResetForNewRun();
 
+        PlayerGridMovement move = player.GetComponent<PlayerGridMovement>();
+        if (move != null) move.enabled = true;
+
+        PlayerSpellController spell = player.GetComponent<PlayerSpellController>();
+        if (spell != null) spell.enabled = true;
+
+        Collider2D col = player.GetComponent<Collider2D>();
+        if (col != null) col.enabled = true;
+
+        SpriteRenderer sr = player.GetComponent<SpriteRenderer>();
+        if (sr != null) sr.enabled = true;
+    }
+
+    private void MovePlayerToStageStart()
+    {
+        if (player == null || GridManager.Instance == null)
+            return;
+
+        GridManager.Instance.Move(player, playerSpawnGridPos);
         GridManager.Instance.Register(player);
     }
 
+    public void UpdateStageScaling()
+    {
+        currentEnemyHealthMultiplier = baseEnemyHealthMultiplier + ((currentStage - 1) * healthIncreasePerStage);
+        currentEnemyDamageMultiplier = baseEnemyDamageMultiplier + ((currentStage - 1) * damageIncreasePerStage);
+        currentEnemyCount = baseEnemyCount + ((currentStage - 1) / extraEnemyEveryXStages);
 
-
-    
+        if (useDDA && DynamicDifficultyManager.Instance != null)
+        {
+            currentEnemyHealthMultiplier += DynamicDifficultyManager.Instance.ddaHealthAdjustment;
+            currentEnemyDamageMultiplier += DynamicDifficultyManager.Instance.ddaDamageAdjustment;
+        }
+    }
 
     public void PlayerDied()
     {
@@ -163,15 +269,13 @@ public class GameManager : MonoBehaviour
 
         Debug.Log("GAME OVER - player died.");
 
-        // Stop enemy turns
         if (TurnManager.Instance != null)
             TurnManager.Instance.ResetTurns();
 
 #if UNITY_EDITOR
         Debug.Log("Game would quit here (Editor mode).");
 #else
-    Application.Quit();
+        Application.Quit();
 #endif
     }
-
 }
