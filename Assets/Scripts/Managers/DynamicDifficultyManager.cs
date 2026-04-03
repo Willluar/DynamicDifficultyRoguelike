@@ -5,17 +5,22 @@ public class DynamicDifficultyManager : MonoBehaviour
 {
     public static DynamicDifficultyManager Instance;
 
-    // Kept for legacy compatibility with older scripts
+    [Header("Legacy")]
     public float enemyHealthMultiplier = 1f;
 
+    [Header("DDA Stat Adjustments")]
     public float ddaHealthAdjustment = 0f;
     public float ddaDamageAdjustment = 0f;
 
+    [Header("Damage-Type Resistances")]
+    [Range(0f, 0.9f)] public float maxTotalResistancePool = 0.45f;
+    [Range(0f, 0.9f)] public float maxSingleResistance = 0.30f;
     public float fireResistanceAdjustment = 0f;
     public float iceResistanceAdjustment = 0f;
     public float lightningResistanceAdjustment = 0f;
     public float meleeResistanceAdjustment = 0f;
 
+    [Header("Data Settings")]
     public int runsToAverage = 5;
 
     private void Awake()
@@ -33,6 +38,7 @@ public class DynamicDifficultyManager : MonoBehaviour
 
         RunDataCollection data = RunDataLogger.Instance.LoadRunData();
         ProcessRecentRunData(data);
+        Debug.Log("DDA manager loading run data");
     }
 
     public void ProcessRecentRunData(RunDataCollection data)
@@ -84,17 +90,68 @@ public class DynamicDifficultyManager : MonoBehaviour
             ddaDamageAdjustment -= 0.02f;
         }
 
-        int maxDamage = Mathf.Max(fireDamage, iceDamage, lightningDamage, meleeDamage);
-
-        if (maxDamage > 0)
-        {
-            if (maxDamage == fireDamage) fireResistanceAdjustment = 0.15f;
-            if (maxDamage == iceDamage) iceResistanceAdjustment = 0.15f;
-            if (maxDamage == lightningDamage) lightningResistanceAdjustment = 0.15f;
-            if (maxDamage == meleeDamage) meleeResistanceAdjustment = 0.15f;
-        }
+        ApplySharedResistancePool(fireDamage, iceDamage, lightningDamage, meleeDamage);
 
         enemyHealthMultiplier = 1f + ddaHealthAdjustment;
+        Debug.Log(
+    $"Processed DDA. Fire={fireResistanceAdjustment:F2}, Ice={iceResistanceAdjustment:F2}, " +
+    $"Lightning={lightningResistanceAdjustment:F2}, Melee={meleeResistanceAdjustment:F2}"
+);
+    }
+
+    private void ApplySharedResistancePool(int fireDamage, int iceDamage, int lightningDamage, int meleeDamage)
+    {
+        int totalTrackedDamage = fireDamage + iceDamage + lightningDamage + meleeDamage;
+
+        if (totalTrackedDamage <= 0)
+            return;
+
+        fireResistanceAdjustment = CalculatePooledResistance(fireDamage, totalTrackedDamage);
+        iceResistanceAdjustment = CalculatePooledResistance(iceDamage, totalTrackedDamage);
+        lightningResistanceAdjustment = CalculatePooledResistance(lightningDamage, totalTrackedDamage);
+        meleeResistanceAdjustment = CalculatePooledResistance(meleeDamage, totalTrackedDamage);
+    }
+
+    private float CalculatePooledResistance(int typeDamage, int totalTrackedDamage)
+    {
+        if (totalTrackedDamage <= 0 || typeDamage <= 0)
+            return 0f;
+
+        float usageRatio = (float)typeDamage / totalTrackedDamage;
+        float pooledResistance = usageRatio * maxTotalResistancePool;
+
+        return Mathf.Min(pooledResistance, maxSingleResistance);
+    }
+
+    public float GetResistanceForDamageType(DamageType damageType)
+    {
+        switch (damageType)
+        {
+            case DamageType.Fire:
+                return fireResistanceAdjustment;
+
+            case DamageType.Ice:
+                return iceResistanceAdjustment;
+
+            case DamageType.Lightning:
+                return lightningResistanceAdjustment;
+
+            case DamageType.Melee:
+                return meleeResistanceAdjustment;
+
+            default:
+                return 0f;
+        }
+    }
+
+    public int ApplyResistanceToDamage(DamageType damageType, int baseDamage)
+    {
+        float resistance = GetResistanceForDamageType(damageType);
+        float multiplier = 1f - resistance;
+
+        int adjustedDamage = Mathf.RoundToInt(baseDamage * multiplier);
+
+        return Mathf.Max(1, adjustedDamage);
     }
 
     private void ResetAdjustments()

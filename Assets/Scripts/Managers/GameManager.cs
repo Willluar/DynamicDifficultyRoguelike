@@ -39,7 +39,9 @@ public class GameManager : MonoBehaviour
     [HideInInspector] public int currentEnemyCount = 3;
 
     private readonly List<GameObject> activeEnemies = new List<GameObject>();
+
     private bool skipPlayerEndTurnOnce = false;
+    private bool pendingStageClear = false;
 
     public bool IsGameOver => gameOver;
 
@@ -49,21 +51,20 @@ public class GameManager : MonoBehaviour
         else Destroy(gameObject);
     }
 
-    
-
     private IEnumerator Start()
     {
-        yield return null; // Let singletons finish Awake first
+        yield return null;
         StartRun();
     }
 
     public void StartRun()
     {
-        currentRun++;
+        currentRun = GetNextRunID();
         currentStage = 1;
         runActive = true;
         gameOver = false;
         skipPlayerEndTurnOnce = false;
+        pendingStageClear = false;
 
         if (useDDA && DynamicDifficultyManager.Instance != null)
             DynamicDifficultyManager.Instance.LoadAndProcessRunData();
@@ -86,6 +87,12 @@ public class GameManager : MonoBehaviour
         {
             RunDataLogger.Instance.StartRun(currentRun, "DefaultBuild");
             RunDataLogger.Instance.SetDDAEnabled(useDDA);
+            RunDataLogger.Instance.StartStage(currentStage);
+            RunDataLogger.Instance.SetCurrentStageDifficulty(
+                currentEnemyHealthMultiplier,
+                currentEnemyDamageMultiplier,
+                currentEnemyCount
+            );
         }
 
         SpawnEnemies();
@@ -95,19 +102,6 @@ public class GameManager : MonoBehaviour
             spellController.RefreshValidTargets();
 
         Debug.Log("Run Started: " + currentRun);
-    }
-
-    public void EndRun(bool win)
-    {
-        runActive = false;
-        Debug.Log("Run Ended. Win: " + win);
-    }
-
-    public bool ConsumeSkipPlayerEndTurnFlag()
-    {
-        bool value = skipPlayerEndTurnOnce;
-        skipPlayerEndTurnOnce = false;
-        return value;
     }
 
     public void RegisterEnemy(GameObject enemy)
@@ -122,7 +116,16 @@ public class GameManager : MonoBehaviour
             activeEnemies.Remove(enemy);
 
         if (activeEnemies.Count == 0 && runActive && !gameOver)
-            HandleStageClear();
+            pendingStageClear = true;
+    }
+
+    public void ResolvePendingStageClear()
+    {
+        if (!pendingStageClear || !runActive || gameOver)
+            return;
+
+        pendingStageClear = false;
+        HandleStageClear();
     }
 
     private void HandleStageClear()
@@ -130,15 +133,7 @@ public class GameManager : MonoBehaviour
         skipPlayerEndTurnOnce = true;
 
         if (RunDataLogger.Instance != null)
-        {
-            RunDataLogger.Instance.SetCurrentStageDifficulty(
-                currentEnemyHealthMultiplier,
-                currentEnemyDamageMultiplier,
-                currentEnemyCount
-            );
-
             RunDataLogger.Instance.CompleteStage();
-        }
 
         currentStage++;
         UpdateStageScaling();
@@ -149,7 +144,14 @@ public class GameManager : MonoBehaviour
         MovePlayerToStageStart();
 
         if (RunDataLogger.Instance != null)
+        {
             RunDataLogger.Instance.StartStage(currentStage);
+            RunDataLogger.Instance.SetCurrentStageDifficulty(
+                currentEnemyHealthMultiplier,
+                currentEnemyDamageMultiplier,
+                currentEnemyCount
+            );
+        }
 
         SpawnEnemies();
 
@@ -192,21 +194,16 @@ public class GameManager : MonoBehaviour
                 GridManager.Instance.GridToWorld(gridPos),
                 Quaternion.identity
             );
+
             enemy.tag = "Enemy";
 
             Health health = enemy.GetComponent<Health>();
             if (health != null)
-            {
                 health.InitialiseEnemyHealth();
-                
-            }
 
             EnemyGridMovement enemyMove = enemy.GetComponent<EnemyGridMovement>();
             if (enemyMove != null)
-            {
                 enemyMove.InitialiseEnemyDamage();
-            }
-            
 
             GridManager.Instance.Register(enemy);
             RegisterEnemy(enemy);
@@ -258,6 +255,34 @@ public class GameManager : MonoBehaviour
             currentEnemyHealthMultiplier += DynamicDifficultyManager.Instance.ddaHealthAdjustment;
             currentEnemyDamageMultiplier += DynamicDifficultyManager.Instance.ddaDamageAdjustment;
         }
+    }
+
+    public bool ConsumeSkipPlayerEndTurnFlag()
+    {
+        bool value = skipPlayerEndTurnOnce;
+        skipPlayerEndTurnOnce = false;
+        return value;
+    }
+
+    private int GetNextRunID()
+    {
+        if (RunDataLogger.Instance == null)
+            return 1;
+
+        RunDataCollection data = RunDataLogger.Instance.LoadRunData();
+
+        if (data == null || data.runs == null || data.runs.Count == 0)
+            return 1;
+
+        int highestRunID = 0;
+
+        foreach (RunData run in data.runs)
+        {
+            if (run != null && run.runID > highestRunID)
+                highestRunID = run.runID;
+        }
+
+        return highestRunID + 1;
     }
 
     public void PlayerDied()

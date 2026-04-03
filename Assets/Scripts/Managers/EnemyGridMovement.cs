@@ -16,9 +16,6 @@ public class EnemyGridMovement : MonoBehaviour
         if (TurnManager.Instance != null)
             TurnManager.Instance.RegisterEnemy(this);
 
-        if (GameManager.Instance != null)
-            attackDamage = Mathf.RoundToInt(baseAttackDamage * GameManager.Instance.currentEnemyDamageMultiplier);
-
         GameObject playerObj = GameObject.FindGameObjectWithTag("Player");
         if (playerObj != null)
             player = playerObj.transform;
@@ -38,6 +35,7 @@ public class EnemyGridMovement : MonoBehaviour
 
         attackDamage = Mathf.RoundToInt(baseAttackDamage * GameManager.Instance.currentEnemyDamageMultiplier);
     }
+
     public void TakeTurn()
     {
         if (player == null || GridManager.Instance == null)

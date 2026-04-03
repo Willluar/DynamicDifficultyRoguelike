@@ -20,7 +20,6 @@ public class SpellData
 {
     public string spellName;
     public SpellType spellType;
-    public DamageType damageType;
 
     public int damage;
     public int range;

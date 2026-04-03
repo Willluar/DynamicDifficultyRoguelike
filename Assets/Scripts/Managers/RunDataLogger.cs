@@ -32,7 +32,7 @@ public class RunDataLogger : MonoBehaviour
             buildID = buildID
         };
 
-        StartStage(1);
+        
     }
 
     public void EndRunOnDeath()

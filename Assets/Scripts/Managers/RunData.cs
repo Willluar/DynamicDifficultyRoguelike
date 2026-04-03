@@ -55,14 +55,4 @@ public class StageData
     public int fireDamage;
     public int iceDamage;
     public int lightningDamage;
-
-    public DifficultySnapshot difficulty;
-}
-
-[Serializable]
-public class DifficultySnapshot
-{
-    public float enemyHealthMultiplier;
-    public float enemyDamageMultiplier;
-    public int enemySpawnCount;
 }

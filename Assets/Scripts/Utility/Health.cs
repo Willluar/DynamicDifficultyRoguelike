@@ -31,7 +31,6 @@ public class Health : MonoBehaviour
 
         maxHealth = Mathf.RoundToInt(baseMaxHealth * GameManager.Instance.currentEnemyHealthMultiplier);
         currentHealth = maxHealth;
-
         UpdateHealthUI();
     }
 
@@ -95,14 +94,15 @@ public class Health : MonoBehaviour
         EnemyGridMovement enemy = GetComponent<EnemyGridMovement>();
         if (enemy != null)
         {
+            // Log the kill before stage clear logic can run
+            if (RunDataLogger.Instance != null)
+                RunDataLogger.Instance.AddEnemyKill();
+
             if (TurnManager.Instance != null)
                 TurnManager.Instance.UnregisterEnemy(enemy);
 
             if (GameManager.Instance != null)
                 GameManager.Instance.UnregisterEnemy(gameObject);
-
-            if (RunDataLogger.Instance != null)
-                RunDataLogger.Instance.AddEnemyKill();
         }
 
         if (GridManager.Instance != null)

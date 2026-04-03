@@ -79,23 +79,29 @@ public class PlayerGridMovement : MonoBehaviour
 
             if (enemy != null && enemyHealth != null)
             {
-                enemyHealth.TakeDamage(attackDamage);
+                int finalDamage = attackDamage;
+
+                if (enemyHealth.isEnemy && DynamicDifficultyManager.Instance != null && GameManager.Instance != null && GameManager.Instance.useDDA)
+                    finalDamage = DynamicDifficultyManager.Instance.ApplyResistanceToDamage(DamageType.Melee, attackDamage);
 
                 if (RunDataLogger.Instance != null)
                 {
                     RunDataLogger.Instance.RecordSpellCast(DamageType.Melee);
-                    RunDataLogger.Instance.RecordDamageByType(DamageType.Melee, attackDamage);
-                    RunDataLogger.Instance.AddDamageDealt(attackDamage);
+                    RunDataLogger.Instance.RecordDamageByType(DamageType.Melee, finalDamage);
+                    RunDataLogger.Instance.AddDamageDealt(finalDamage);
                 }
 
-                if (GameManager.Instance == null || !GameManager.Instance.ConsumeSkipPlayerEndTurnFlag())
-                {
-                    if (TurnManager.Instance != null)
-                        TurnManager.Instance.EndPlayerTurn();
-                }
+                enemyHealth.TakeDamage(finalDamage);
+
+                if (GameManager.Instance != null)
+                    GameManager.Instance.ResolvePendingStageClear();
+
+                bool skipTurn = GameManager.Instance != null && GameManager.Instance.ConsumeSkipPlayerEndTurnFlag();
+
+                if (!skipTurn && TurnManager.Instance != null)
+                    TurnManager.Instance.EndPlayerTurn();
             }
 
-            // Occupied by wall or other blocker = do nothing, do not spend turn
             return;
         }
 
