@@ -1,4 +1,3 @@
-using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 
@@ -13,6 +12,7 @@ public class GameManager : MonoBehaviour
     public int currentRun = 0;
     public bool runActive = false;
     private bool gameOver = false;
+    private bool runStartedFromMenu = false;
 
     [Header("References")]
     public GameObject player;
@@ -44,6 +44,7 @@ public class GameManager : MonoBehaviour
     private bool pendingStageClear = false;
 
     public bool IsGameOver => gameOver;
+    public bool HasRunStartedFromMenu => runStartedFromMenu;
 
     private void Awake()
     {
@@ -51,14 +52,13 @@ public class GameManager : MonoBehaviour
         else Destroy(gameObject);
     }
 
-    private IEnumerator Start()
-    {
-        yield return null;
-        StartRun();
-    }
-
     public void StartRun()
     {
+        runStartedFromMenu = true;
+
+        if (SimulationManager.Instance != null)
+            SimulationManager.Instance.ApplySimulationSettings();
+
         currentRun = GetNextRunID();
         currentStage = 1;
         runActive = true;
@@ -101,7 +101,31 @@ public class GameManager : MonoBehaviour
         if (spellController != null)
             spellController.RefreshValidTargets();
 
+        if (MultiRunBatchController.Instance != null)
+            MultiRunBatchController.Instance.NotifyRunStarted(currentRun);
+
         Debug.Log("Run Started: " + currentRun);
+    }
+
+    private int GetNextRunID()
+    {
+        if (RunDataLogger.Instance == null)
+            return currentRun + 1;
+
+        RunDataCollection data = RunDataLogger.Instance.LoadRunData();
+
+        if (data == null || data.runs == null || data.runs.Count == 0)
+            return 1;
+
+        int highestRunID = 0;
+
+        foreach (RunData run in data.runs)
+        {
+            if (run != null && run.runID > highestRunID)
+                highestRunID = run.runID;
+        }
+
+        return highestRunID + 1;
     }
 
     public void RegisterEnemy(GameObject enemy)
@@ -162,14 +186,14 @@ public class GameManager : MonoBehaviour
 
     private void CleanupEnemies()
     {
-        foreach (var e in activeEnemies)
+        foreach (GameObject e in activeEnemies)
         {
             if (e != null) Destroy(e);
         }
 
         activeEnemies.Clear();
 
-        foreach (var enemy in GameObject.FindGameObjectsWithTag("Enemy"))
+        foreach (GameObject enemy in GameObject.FindGameObjectsWithTag("Enemy"))
         {
             Destroy(enemy);
         }
@@ -228,11 +252,36 @@ public class GameManager : MonoBehaviour
         PlayerSpellController spell = player.GetComponent<PlayerSpellController>();
         if (spell != null) spell.enabled = true;
 
+        SimulatedPlayerController simulator = player.GetComponent<SimulatedPlayerController>();
+        if (simulator != null) simulator.enabled = true;
+
         Collider2D col = player.GetComponent<Collider2D>();
         if (col != null) col.enabled = true;
 
         SpriteRenderer sr = player.GetComponent<SpriteRenderer>();
         if (sr != null) sr.enabled = true;
+
+        ApplyPlayerControlMode();
+    }
+
+    private void ApplyPlayerControlMode()
+    {
+        if (player == null)
+            return;
+
+        bool useSim = SimulationManager.Instance != null && SimulationManager.Instance.IsUsingSimulatedPlayer();
+
+        PlayerGridMovement move = player.GetComponent<PlayerGridMovement>();
+        if (move != null)
+            move.enabled = !useSim;
+
+        SimulatedPlayerController simulator = player.GetComponent<SimulatedPlayerController>();
+        if (simulator != null)
+            simulator.enabled = useSim;
+
+        PlayerSpellController spell = player.GetComponent<PlayerSpellController>();
+        if (spell != null)
+            spell.enabled = true;
     }
 
     private void MovePlayerToStageStart()
@@ -242,6 +291,8 @@ public class GameManager : MonoBehaviour
 
         GridManager.Instance.Move(player, playerSpawnGridPos);
         GridManager.Instance.Register(player);
+
+        ApplyPlayerControlMode();
     }
 
     public void UpdateStageScaling()
@@ -264,30 +315,10 @@ public class GameManager : MonoBehaviour
         return value;
     }
 
-    private int GetNextRunID()
-    {
-        if (RunDataLogger.Instance == null)
-            return 1;
-
-        RunDataCollection data = RunDataLogger.Instance.LoadRunData();
-
-        if (data == null || data.runs == null || data.runs.Count == 0)
-            return 1;
-
-        int highestRunID = 0;
-
-        foreach (RunData run in data.runs)
-        {
-            if (run != null && run.runID > highestRunID)
-                highestRunID = run.runID;
-        }
-
-        return highestRunID + 1;
-    }
-
     public void PlayerDied()
     {
-        if (gameOver) return;
+        if (gameOver)
+            return;
 
         gameOver = true;
         runActive = false;
@@ -297,8 +328,19 @@ public class GameManager : MonoBehaviour
         if (TurnManager.Instance != null)
             TurnManager.Instance.ResetTurns();
 
+        bool batchHandled = false;
+
+        if (MultiRunBatchController.Instance != null)
+            batchHandled = MultiRunBatchController.Instance.HandleRunEnded();
+
+        if (batchHandled)
+        {
+            Debug.Log("Batch controller will start the next run.");
+            return;
+        }
+
 #if UNITY_EDITOR
-        Debug.Log("Game would quit here (Editor mode).");
+        Debug.Log("Run ended. No batch continuation active.");
 #else
         Application.Quit();
 #endif

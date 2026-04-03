@@ -15,7 +15,7 @@ public class PlayerSpellController : MonoBehaviour
 
     private SpellData currentSpell;
 
-    private List<EnemyGridMovement> validTargets = new List<EnemyGridMovement>();
+    private readonly List<EnemyGridMovement> validTargets = new List<EnemyGridMovement>();
     private int currentTargetIndex = -1;
 
     private bool isCasting = false;
@@ -32,6 +32,9 @@ public class PlayerSpellController : MonoBehaviour
 
     private void Update()
     {
+        if (SimulationManager.Instance != null && SimulationManager.Instance.IsUsingSimulatedPlayer())
+            return;
+
         if (GameManager.Instance != null && GameManager.Instance.IsGameOver)
             return;
 
@@ -93,7 +96,119 @@ public class PlayerSpellController : MonoBehaviour
         if (keyboard == null) return;
 
         if (keyboard.spaceKey.wasPressedThisFrame)
-            StartCoroutine(CastCurrentSpellRoutine());
+            CastCurrentSpell();
+    }
+
+    public void CastCurrentSpell()
+    {
+        if (isCasting)
+            return;
+
+        if (TurnManager.Instance == null || !TurnManager.Instance.IsPlayerTurn())
+            return;
+
+        StartCoroutine(CastCurrentSpellRoutine());
+    }
+
+    public bool IsCasting()
+    {
+        return isCasting;
+    }
+
+    public void SetCurrentSpell(SpellType spellType)
+    {
+        SpellData spell = GetSpellData(spellType);
+        if (spell == null)
+            return;
+
+        currentSpell = spell;
+
+        if (spellUI != null)
+            spellUI.SetSelectedSpell(currentSpell.spellType);
+
+        RefreshValidTargets();
+    }
+
+    public string GetCurrentSpellName()
+    {
+        return currentSpell != null ? currentSpell.spellName : "None";
+    }
+
+    public SpellType GetCurrentSpellType()
+    {
+        return currentSpell != null ? currentSpell.spellType : SpellType.IceBolt;
+    }
+
+    public DamageType GetDamageTypeForSpell(SpellType spellType)
+    {
+        switch (spellType)
+        {
+            case SpellType.IceBolt:
+                return DamageType.Ice;
+            case SpellType.LightningBolt:
+                return DamageType.Lightning;
+            case SpellType.Fireball:
+                return DamageType.Fire;
+            default:
+                return DamageType.Melee;
+        }
+    }
+
+    public float GetResistanceForSpell(SpellType spellType)
+    {
+        if (DynamicDifficultyManager.Instance == null || GameManager.Instance == null || !GameManager.Instance.useDDA)
+            return 0f;
+
+        return DynamicDifficultyManager.Instance.GetResistanceForDamageType(GetDamageTypeForSpell(spellType));
+    }
+
+    public bool HasValidTargetForSpell(SpellType spellType)
+    {
+        return GetBestHitCountForSpell(spellType) > 0;
+    }
+
+    public int GetBestHitCountForSpell(SpellType spellType)
+    {
+        SpellData spell = GetSpellData(spellType);
+
+        if (spell == null || GridManager.Instance == null)
+            return 0;
+
+        EnemyGridMovement[] allEnemies = FindObjectsByType<EnemyGridMovement>(FindObjectsSortMode.None);
+        Vector2Int playerGrid = GridManager.Instance.WorldToGrid(transform.position);
+
+        int bestHitCount = 0;
+
+        foreach (EnemyGridMovement primaryTarget in allEnemies)
+        {
+            if (primaryTarget == null)
+                continue;
+
+            Vector2Int targetGrid = GridManager.Instance.WorldToGrid(primaryTarget.transform.position);
+            int distance = Mathf.Abs(targetGrid.x - playerGrid.x) + Mathf.Abs(targetGrid.y - playerGrid.y);
+
+            if (distance > spell.range)
+                continue;
+
+            if (!LineOfSightUtility.HasLineOfSight(playerGrid, targetGrid))
+                continue;
+
+            int hitCount = 1;
+
+            if (spell.spellType == SpellType.Fireball)
+            {
+                hitCount = CountFireballHits(targetGrid, spell.splashRadius, allEnemies);
+            }
+            else if (spell.spellType == SpellType.LightningBolt)
+            {
+                hitCount = CountLightningHits(primaryTarget, spell.chainRange, spell.chainCount, allEnemies);
+            }
+
+            if (hitCount > bestHitCount)
+                bestHitCount = hitCount;
+        }
+
+        return bestHitCount;
     }
 
     public void RefreshValidTargets()
@@ -129,6 +244,71 @@ public class PlayerSpellController : MonoBehaviour
             currentTargetIndex = 0;
             HighlightCurrentTarget();
         }
+    }
+
+    private SpellData GetSpellData(SpellType spellType)
+    {
+        switch (spellType)
+        {
+            case SpellType.IceBolt:
+                return iceBolt;
+            case SpellType.LightningBolt:
+                return lightningBolt;
+            case SpellType.Fireball:
+                return fireball;
+            default:
+                return null;
+        }
+    }
+
+    private int CountFireballHits(Vector2Int targetGrid, int splashRadius, EnemyGridMovement[] allEnemies)
+    {
+        int hitCount = 0;
+
+        foreach (EnemyGridMovement enemy in allEnemies)
+        {
+            if (enemy == null)
+                continue;
+
+            Vector2Int enemyGrid = GridManager.Instance.WorldToGrid(enemy.transform.position);
+            int distance = Mathf.Abs(enemyGrid.x - targetGrid.x) + Mathf.Abs(enemyGrid.y - targetGrid.y);
+
+            if (distance <= splashRadius)
+                hitCount++;
+        }
+
+        return hitCount;
+    }
+
+    private int CountLightningHits(EnemyGridMovement primaryTarget, int chainRange, int chainCount, EnemyGridMovement[] allEnemies)
+    {
+        if (primaryTarget == null)
+            return 0;
+
+        int hitCount = 1;
+        int chainsDone = 0;
+
+        Vector2Int primaryGrid = GridManager.Instance.WorldToGrid(primaryTarget.transform.position);
+
+        foreach (EnemyGridMovement enemy in allEnemies)
+        {
+            if (enemy == null || enemy == primaryTarget)
+                continue;
+
+            Vector2Int enemyGrid = GridManager.Instance.WorldToGrid(enemy.transform.position);
+            int distance = Mathf.Abs(enemyGrid.x - primaryGrid.x) + Mathf.Abs(enemyGrid.y - primaryGrid.y);
+
+            if (distance <= chainRange)
+            {
+                hitCount++;
+                chainsDone++;
+            }
+
+            if (chainsDone >= chainCount)
+                break;
+        }
+
+        return hitCount;
     }
 
     private void CycleTarget()
@@ -180,6 +360,8 @@ public class PlayerSpellController : MonoBehaviour
         if (currentSpell == null)
             yield break;
 
+        RefreshValidTargets();
+
         if (validTargets.Count == 0 || currentTargetIndex < 0 || currentTargetIndex >= validTargets.Count)
             yield break;
 
@@ -191,7 +373,7 @@ public class PlayerSpellController : MonoBehaviour
             yield break;
         }
 
-        DamageType spellDamageType = GetDamageTypeForSpell(currentSpell);
+        DamageType spellDamageType = GetDamageTypeForSpell(currentSpell.spellType);
 
         if (RunDataLogger.Instance != null)
             RunDataLogger.Instance.RecordSpellCast(spellDamageType);
@@ -200,8 +382,14 @@ public class PlayerSpellController : MonoBehaviour
         ClearAllHighlights();
 
         bool hitResolved = false;
+        bool skipVisuals = SimulationManager.Instance != null && SimulationManager.Instance.ShouldSkipSpellVisuals();
 
-        if (currentSpell.projectilePrefab != null)
+        if (skipVisuals)
+        {
+            ResolveSpellEffect(target);
+            hitResolved = true;
+        }
+        else if (currentSpell.projectilePrefab != null)
         {
             Vector3 startPos = transform.position;
             Vector3 endPos = target.transform.position;
@@ -249,9 +437,10 @@ public class PlayerSpellController : MonoBehaviour
         if (target == null || currentSpell == null)
             return;
 
+        bool skipVisuals = SimulationManager.Instance != null && SimulationManager.Instance.ShouldSkipSpellVisuals();
         Vector3 impactPos = target.transform.position;
 
-        if (currentSpell.impactEffectPrefab != null)
+        if (!skipVisuals && currentSpell.impactEffectPrefab != null)
         {
             GameObject impact = Instantiate(currentSpell.impactEffectPrefab, impactPos, Quaternion.identity);
             SpellEffectVisual impactVisual = impact.GetComponent<SpellEffectVisual>();
@@ -267,33 +456,12 @@ public class PlayerSpellController : MonoBehaviour
                 break;
 
             case SpellType.LightningBolt:
-                CastLightningBolt(target);
+                CastLightningBolt(target, skipVisuals);
                 break;
 
             case SpellType.Fireball:
-                CastFireball(target);
+                CastFireball(target, skipVisuals);
                 break;
-        }
-    }
-
-    private DamageType GetDamageTypeForSpell(SpellData spell)
-    {
-        if (spell == null)
-            return DamageType.Melee;
-
-        switch (spell.spellType)
-        {
-            case SpellType.IceBolt:
-                return DamageType.Ice;
-
-            case SpellType.LightningBolt:
-                return DamageType.Lightning;
-
-            case SpellType.Fireball:
-                return DamageType.Fire;
-
-            default:
-                return DamageType.Melee;
         }
     }
 
@@ -302,29 +470,16 @@ public class PlayerSpellController : MonoBehaviour
         if (health == null || currentSpell == null)
             return;
 
-        DamageType spellDamageType = GetDamageTypeForSpell(currentSpell);
-
+        DamageType spellDamageType = GetDamageTypeForSpell(currentSpell.spellType);
         int finalDamage = baseAmount;
 
-        Debug.Log("----- SPELL DAMAGE DEBUG -----");
-        Debug.Log("DDA Enabled: " + GameManager.Instance.useDDA);
-        Debug.Log("DDA Instance: " + (DynamicDifficultyManager.Instance == null ? "NULL" : "PRESENT"));
-        Debug.Log("Damage Type: " + spellDamageType);
-        Debug.Log("Base Damage: " + baseAmount);
-
-        if (health.isEnemy && DynamicDifficultyManager.Instance != null && GameManager.Instance != null && GameManager.Instance.useDDA)
+        if (health.isEnemy &&
+            DynamicDifficultyManager.Instance != null &&
+            GameManager.Instance != null &&
+            GameManager.Instance.useDDA)
         {
-            float resistance = DynamicDifficultyManager.Instance.GetResistanceForDamageType(spellDamageType);
-            Debug.Log("Resistance Applied: " + resistance);
-
             finalDamage = DynamicDifficultyManager.Instance.ApplyResistanceToDamage(spellDamageType, baseAmount);
         }
-        else
-        {
-            Debug.Log("Resistance NOT applied (failed condition)");
-        }
-
-        Debug.Log("Final Damage: " + finalDamage);
 
         if (RunDataLogger.Instance != null)
         {
@@ -345,7 +500,7 @@ public class PlayerSpellController : MonoBehaviour
             ApplySpellDamage(health, currentSpell.damage);
     }
 
-    private void CastLightningBolt(EnemyGridMovement primaryTarget)
+    private void CastLightningBolt(EnemyGridMovement primaryTarget, bool skipVisuals)
     {
         if (primaryTarget == null || currentSpell == null || GridManager.Instance == null)
             return;
@@ -378,7 +533,7 @@ public class PlayerSpellController : MonoBehaviour
                 {
                     ApplySpellDamage(health, currentSpell.damage);
 
-                    if (currentSpell.secondaryEffectPrefab != null)
+                    if (!skipVisuals && currentSpell.secondaryEffectPrefab != null)
                     {
                         GameObject chainEffect = Instantiate(currentSpell.secondaryEffectPrefab);
                         SpellEffectVisual visual = chainEffect.GetComponent<SpellEffectVisual>();
@@ -397,7 +552,7 @@ public class PlayerSpellController : MonoBehaviour
         }
     }
 
-    private void CastFireball(EnemyGridMovement target)
+    private void CastFireball(EnemyGridMovement target, bool skipVisuals)
     {
         if (target == null || currentSpell == null || GridManager.Instance == null)
             return;
@@ -405,7 +560,7 @@ public class PlayerSpellController : MonoBehaviour
         Vector2Int targetGrid = GridManager.Instance.WorldToGrid(target.transform.position);
         EnemyGridMovement[] snapshot = FindObjectsByType<EnemyGridMovement>(FindObjectsSortMode.None);
 
-        if (currentSpell.secondaryEffectPrefab != null)
+        if (!skipVisuals && currentSpell.secondaryEffectPrefab != null)
         {
             GameObject explosion = Instantiate(currentSpell.secondaryEffectPrefab);
             SpellEffectVisual visual = explosion.GetComponent<SpellEffectVisual>();
@@ -431,10 +586,5 @@ public class PlayerSpellController : MonoBehaviour
                     ApplySpellDamage(health, currentSpell.damage);
             }
         }
-    }
-
-    public string GetCurrentSpellName()
-    {
-        return currentSpell != null ? currentSpell.spellName : "None";
     }
 }

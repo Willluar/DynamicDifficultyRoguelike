@@ -17,13 +17,25 @@ public class PlayerGridMovement : MonoBehaviour
     private void OnEnable()
     {
         inputActions.Enable();
-        inputActions.Player.Move.performed += ctx => input = ctx.ReadValue<Vector2>();
-        inputActions.Player.Move.canceled += ctx => input = Vector2.zero;
+        inputActions.Player.Move.performed += OnMovePerformed;
+        inputActions.Player.Move.canceled += OnMoveCancelled;
     }
 
     private void OnDisable()
     {
+        inputActions.Player.Move.performed -= OnMovePerformed;
+        inputActions.Player.Move.canceled -= OnMoveCancelled;
         inputActions.Disable();
+    }
+
+    private void OnMovePerformed(InputAction.CallbackContext ctx)
+    {
+        input = ctx.ReadValue<Vector2>();
+    }
+
+    private void OnMoveCancelled(InputAction.CallbackContext ctx)
+    {
+        input = Vector2.zero;
     }
 
     private void Start()
@@ -34,6 +46,9 @@ public class PlayerGridMovement : MonoBehaviour
 
     private void Update()
     {
+        if (SimulationManager.Instance != null && SimulationManager.Instance.IsUsingSimulatedPlayer())
+            return;
+
         if (GameManager.Instance != null && GameManager.Instance.IsGameOver)
             return;
 
@@ -49,7 +64,7 @@ public class PlayerGridMovement : MonoBehaviour
         }
     }
 
-    private Vector2Int GetCardinalDirection(Vector2 rawInput)
+    public Vector2Int GetCardinalDirection(Vector2 rawInput)
     {
         if (Mathf.Abs(rawInput.x) > Mathf.Abs(rawInput.y))
             return rawInput.x > 0 ? Vector2Int.right : Vector2Int.left;
@@ -59,16 +74,68 @@ public class PlayerGridMovement : MonoBehaviour
         return Vector2Int.zero;
     }
 
-    private void AttemptMove(Vector2Int direction)
+    public bool HasAdjacentEnemy(out Vector2Int directionToEnemy)
+    {
+        directionToEnemy = Vector2Int.zero;
+
+        if (GridManager.Instance == null)
+            return false;
+
+        Vector2Int currentGrid = GridManager.Instance.WorldToGrid(transform.position);
+
+        Vector2Int[] directions =
+        {
+            Vector2Int.up,
+            Vector2Int.down,
+            Vector2Int.left,
+            Vector2Int.right
+        };
+
+        foreach (Vector2Int direction in directions)
+        {
+            Vector2Int checkGrid = currentGrid + direction;
+
+            if (!GridManager.Instance.IsInsideGrid(checkGrid))
+                continue;
+
+            if (!GridManager.Instance.IsTileOccupied(checkGrid))
+                continue;
+
+            GameObject occupant = GridManager.Instance.GetOccupant(checkGrid);
+            if (occupant == null)
+                continue;
+
+            if (occupant.GetComponent<EnemyGridMovement>() != null)
+            {
+                directionToEnemy = direction;
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    public bool PerformSimulatedAction(Vector2Int direction)
+    {
+        if (GameManager.Instance != null && GameManager.Instance.IsGameOver)
+            return false;
+
+        if (TurnManager.Instance == null || !TurnManager.Instance.IsPlayerTurn())
+            return false;
+
+        return AttemptMove(direction);
+    }
+
+    private bool AttemptMove(Vector2Int direction)
     {
         if (GridManager.Instance == null)
-            return;
+            return false;
 
         Vector2Int currentGrid = GridManager.Instance.WorldToGrid(transform.position);
         Vector2Int targetGrid = currentGrid + direction;
 
         if (!GridManager.Instance.IsInsideGrid(targetGrid))
-            return;
+            return false;
 
         if (GridManager.Instance.IsTileOccupied(targetGrid))
         {
@@ -81,8 +148,13 @@ public class PlayerGridMovement : MonoBehaviour
             {
                 int finalDamage = attackDamage;
 
-                if (enemyHealth.isEnemy && DynamicDifficultyManager.Instance != null && GameManager.Instance != null && GameManager.Instance.useDDA)
+                if (enemyHealth.isEnemy &&
+                    DynamicDifficultyManager.Instance != null &&
+                    GameManager.Instance != null &&
+                    GameManager.Instance.useDDA)
+                {
                     finalDamage = DynamicDifficultyManager.Instance.ApplyResistanceToDamage(DamageType.Melee, attackDamage);
+                }
 
                 if (RunDataLogger.Instance != null)
                 {
@@ -100,14 +172,18 @@ public class PlayerGridMovement : MonoBehaviour
 
                 if (!skipTurn && TurnManager.Instance != null)
                     TurnManager.Instance.EndPlayerTurn();
+
+                return true;
             }
 
-            return;
+            return false;
         }
 
         GridManager.Instance.Move(gameObject, targetGrid);
 
         if (TurnManager.Instance != null)
             TurnManager.Instance.EndPlayerTurn();
+
+        return true;
     }
 }
