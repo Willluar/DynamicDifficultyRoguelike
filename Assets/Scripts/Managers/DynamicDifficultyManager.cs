@@ -5,23 +5,46 @@ public class DynamicDifficultyManager : MonoBehaviour
 {
     public static DynamicDifficultyManager Instance;
 
-    [Header("Legacy")]
+    [Header("Legacy Compatibility")]
     public float enemyHealthMultiplier = 1f;
 
-    [Header("DDA Stat Adjustments")]
+    [Header("Base DDA Stat Adjustments")]
     public float ddaHealthAdjustment = 0f;
     public float ddaDamageAdjustment = 0f;
 
-    [Header("Damage-Type Resistances")]
-    [Range(0f, 0.9f)] public float maxTotalResistancePool = 0.45f;
-    [Range(0f, 0.9f)] public float maxSingleResistance = 0.30f;
+    [Header("Resistance Pool")]
+    [Range(0f, 0.95f)] public float baseTotalResistancePool = 0.45f;
+    [Range(0f, 0.95f)] public float baseSingleResistanceCap = 0.30f;
+
+    [Header("DDA Growth Over Time")]
+    [Tooltip("How much stronger DDA becomes per completed analysed run.")]
+    public float strengthIncreasePerRun = 0.05f;
+
+    [Tooltip("Maximum extra strength multiplier added over time.")]
+    public float maxExtraStrength = 0.75f;
+
+    [Tooltip("Also scale health/damage adjustments upward over time.")]
+    public bool scaleStatAdjustmentsWithStrength = true;
+
+    [Header("Run Analysis")]
+    [Tooltip("How many past runs to analyse each time.")]
+    public int runsToAverage = 5;
+
+    [Tooltip("Only use DDA-enabled runs when analysing history. Keep this on for cleaner comparisons.")]
+    public bool analyseOnlyDDARuns = true;
+
+    [Header("Current Resistance Outputs")]
     public float fireResistanceAdjustment = 0f;
     public float iceResistanceAdjustment = 0f;
     public float lightningResistanceAdjustment = 0f;
     public float meleeResistanceAdjustment = 0f;
 
-    [Header("Data Settings")]
-    public int runsToAverage = 5;
+    [Header("Debug")]
+    public bool verboseLogging = true;
+
+    private float currentStrengthMultiplier = 1f;
+    private float currentTotalResistancePool = 0.45f;
+    private float currentSingleResistanceCap = 0.30f;
 
     private void Awake()
     {
@@ -38,7 +61,6 @@ public class DynamicDifficultyManager : MonoBehaviour
 
         RunDataCollection data = RunDataLogger.Instance.LoadRunData();
         ProcessRecentRunData(data);
-        Debug.Log("DDA manager loading run data");
     }
 
     public void ProcessRecentRunData(RunDataCollection data)
@@ -46,21 +68,46 @@ public class DynamicDifficultyManager : MonoBehaviour
         ResetAdjustments();
 
         if (data == null || data.runs == null || data.runs.Count == 0)
-            return;
-
-        List<RunData> relevantRuns = new List<RunData>();
-
-        for (int i = data.runs.Count - 1; i >= 0; i--)
         {
-            if (data.runs[i] != null && data.runs[i].ddaEnabled)
-                relevantRuns.Add(data.runs[i]);
-
-            if (relevantRuns.Count >= runsToAverage)
-                break;
+            if (verboseLogging)
+                Debug.Log("DDA: No historical runs found. Using default adjustments.");
+            return;
         }
 
-        if (relevantRuns.Count == 0)
+        List<RunData> candidateRuns = new List<RunData>();
+
+        foreach (RunData run in data.runs)
+        {
+            if (run == null)
+                continue;
+
+            if (analyseOnlyDDARuns && !run.ddaEnabled)
+                continue;
+
+            candidateRuns.Add(run);
+        }
+
+        if (candidateRuns.Count == 0)
+        {
+            if (verboseLogging)
+                Debug.Log("DDA: No valid historical runs found after filtering. Using default adjustments.");
             return;
+        }
+
+        // Take the last N valid runs.
+        int startIndex = Mathf.Max(0, candidateRuns.Count - runsToAverage);
+        List<RunData> relevantRuns = candidateRuns.GetRange(startIndex, candidateRuns.Count - startIndex);
+
+        // Strength grows over time based on how many valid historical runs exist.
+        int historicalRunCount = candidateRuns.Count;
+        currentStrengthMultiplier = 1f + Mathf.Min(maxExtraStrength, historicalRunCount * strengthIncreasePerRun);
+
+        currentTotalResistancePool = baseTotalResistancePool * currentStrengthMultiplier;
+        currentSingleResistanceCap = baseSingleResistanceCap * currentStrengthMultiplier;
+
+        // Never allow the pooled total or single cap to become absurd.
+        currentTotalResistancePool = Mathf.Clamp(currentTotalResistancePool, 0f, 0.90f);
+        currentSingleResistanceCap = Mathf.Clamp(currentSingleResistanceCap, 0f, 0.75f);
 
         float averageStages = 0f;
         int fireDamage = 0;
@@ -79,24 +126,70 @@ public class DynamicDifficultyManager : MonoBehaviour
 
         averageStages /= relevantRuns.Count;
 
-        if (averageStages >= 4f)
-        {
-            ddaHealthAdjustment += 0.1f;
-            ddaDamageAdjustment += 0.05f;
-        }
-        else if (averageStages <= 1.5f)
-        {
-            ddaHealthAdjustment -= 0.05f;
-            ddaDamageAdjustment -= 0.02f;
-        }
-
+        ApplyPerformanceScaling(averageStages);
         ApplySharedResistancePool(fireDamage, iceDamage, lightningDamage, meleeDamage);
 
         enemyHealthMultiplier = 1f + ddaHealthAdjustment;
-        Debug.Log(
-    $"Processed DDA. Fire={fireResistanceAdjustment:F2}, Ice={iceResistanceAdjustment:F2}, " +
-    $"Lightning={lightningResistanceAdjustment:F2}, Melee={meleeResistanceAdjustment:F2}"
-);
+
+        if (verboseLogging)
+        {
+            Debug.Log(
+                $"DDA Processed | Runs Analysed={relevantRuns.Count} | Historical Valid Runs={historicalRunCount} | " +
+                $"Strength={currentStrengthMultiplier:F2} | AvgStages={averageStages:F2} | " +
+                $"Pool={currentTotalResistancePool:F2} | Cap={currentSingleResistanceCap:F2}"
+            );
+
+            Debug.Log(
+                $"DDA Resistances | Fire={fireResistanceAdjustment:F2} | Ice={iceResistanceAdjustment:F2} | " +
+                $"Lightning={lightningResistanceAdjustment:F2} | Melee={meleeResistanceAdjustment:F2}"
+            );
+
+            Debug.Log(
+                $"DDA Stat Adjustments | HealthAdj={ddaHealthAdjustment:F2} | DamageAdj={ddaDamageAdjustment:F2}"
+            );
+        }
+    }
+
+    private void ApplyPerformanceScaling(float averageStages)
+    {
+        float healthStepUp = 0.10f;
+        float damageStepUp = 0.05f;
+        float healthStepDown = 0.05f;
+        float damageStepDown = 0.02f;
+
+        if (scaleStatAdjustmentsWithStrength)
+        {
+            healthStepUp *= currentStrengthMultiplier;
+            damageStepUp *= currentStrengthMultiplier;
+            healthStepDown *= currentStrengthMultiplier;
+            damageStepDown *= currentStrengthMultiplier;
+        }
+
+        // Stronger player performance -> stronger future enemies.
+        if (averageStages >= 12f)
+        {
+            ddaHealthAdjustment += healthStepUp * 1.75f;
+            ddaDamageAdjustment += damageStepUp * 1.75f;
+        }
+        else if (averageStages >= 8f)
+        {
+            ddaHealthAdjustment += healthStepUp * 1.25f;
+            ddaDamageAdjustment += damageStepUp * 1.25f;
+        }
+        else if (averageStages >= 4f)
+        {
+            ddaHealthAdjustment += healthStepUp;
+            ddaDamageAdjustment += damageStepUp;
+        }
+        else if (averageStages <= 1.5f)
+        {
+            ddaHealthAdjustment -= healthStepDown;
+            ddaDamageAdjustment -= damageStepDown;
+        }
+
+        // Clamp to avoid extreme runaway scaling.
+        ddaHealthAdjustment = Mathf.Clamp(ddaHealthAdjustment, -0.20f, 1.50f);
+        ddaDamageAdjustment = Mathf.Clamp(ddaDamageAdjustment, -0.10f, 1.00f);
     }
 
     private void ApplySharedResistancePool(int fireDamage, int iceDamage, int lightningDamage, int meleeDamage)
@@ -118,9 +211,9 @@ public class DynamicDifficultyManager : MonoBehaviour
             return 0f;
 
         float usageRatio = (float)typeDamage / totalTrackedDamage;
-        float pooledResistance = usageRatio * maxTotalResistancePool;
+        float resistance = usageRatio * currentTotalResistancePool;
 
-        return Mathf.Min(pooledResistance, maxSingleResistance);
+        return Mathf.Min(resistance, currentSingleResistanceCap);
     }
 
     public float GetResistanceForDamageType(DamageType damageType)
@@ -154,6 +247,21 @@ public class DynamicDifficultyManager : MonoBehaviour
         return Mathf.Max(1, adjustedDamage);
     }
 
+    public float GetCurrentStrengthMultiplier()
+    {
+        return currentStrengthMultiplier;
+    }
+
+    public float GetCurrentTotalResistancePool()
+    {
+        return currentTotalResistancePool;
+    }
+
+    public float GetCurrentSingleResistanceCap()
+    {
+        return currentSingleResistanceCap;
+    }
+
     private void ResetAdjustments()
     {
         ddaHealthAdjustment = 0f;
@@ -163,6 +271,10 @@ public class DynamicDifficultyManager : MonoBehaviour
         iceResistanceAdjustment = 0f;
         lightningResistanceAdjustment = 0f;
         meleeResistanceAdjustment = 0f;
+
+        currentStrengthMultiplier = 1f;
+        currentTotalResistancePool = baseTotalResistancePool;
+        currentSingleResistanceCap = baseSingleResistanceCap;
 
         enemyHealthMultiplier = 1f;
     }

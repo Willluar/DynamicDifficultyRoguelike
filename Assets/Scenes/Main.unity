@@ -784,13 +784,18 @@ MonoBehaviour:
   enemyHealthMultiplier: 1
   ddaHealthAdjustment: 0
   ddaDamageAdjustment: 0
-  maxTotalResistancePool: 0.45
-  maxSingleResistance: 0.3
+  baseTotalResistancePool: 0.9
+  baseSingleResistanceCap: 0.7
+  strengthIncreasePerRun: 0.05
+  maxExtraStrength: 0.75
+  scaleStatAdjustmentsWithStrength: 1
+  runsToAverage: 5
+  analyseOnlyDDARuns: 1
   fireResistanceAdjustment: 0
   iceResistanceAdjustment: 0
   lightningResistanceAdjustment: 0
   meleeResistanceAdjustment: 0
-  runsToAverage: 5
+  verboseLogging: 1
 --- !u!1 &301196086
 GameObject:
   m_ObjectHideFlags: 0
@@ -2216,7 +2221,10 @@ MonoBehaviour:
   movement: {fileID: 0}
   spellController: {fileID: 0}
   resistanceAvoidThreshold: 0.25
+  adjacentThreatThreshold: 2
+  weakAttackScoreThreshold: 120
   allowMeleeWhenAdjacent: 1
+  meleeScorePreferenceRatio: 0.9
 --- !u!1 &752213381
 GameObject:
   m_ObjectHideFlags: 0
@@ -3421,8 +3429,8 @@ MonoBehaviour:
   baseEnemyHealthMultiplier: 1
   baseEnemyDamageMultiplier: 1
   baseEnemyCount: 3
-  healthIncreasePerStage: 0.1
-  damageIncreasePerStage: 0.05
+  healthIncreasePerStage: 0.2
+  damageIncreasePerStage: 0.1
   extraEnemyEveryXStages: 2
   currentEnemyHealthMultiplier: 1
   currentEnemyDamageMultiplier: 1
