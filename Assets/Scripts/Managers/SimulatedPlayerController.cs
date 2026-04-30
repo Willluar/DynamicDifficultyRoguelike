@@ -9,21 +9,11 @@ public class SimulatedPlayerController : MonoBehaviour
     public PlayerSpellController spellController;
 
     [Header("Decision Settings")]
-    [Tooltip("If spell resistance is above this and it only hits one target, the simulator becomes more willing to avoid that spell.")]
     public float resistanceAvoidThreshold = 0.25f;
-
-    [Tooltip("If two or more enemies are adjacent and the current attack is weak, try to reposition.")]
     public int adjacentThreatThreshold = 2;
-
-    [Tooltip("Only move away under pressure if the best current attack is below this score.")]
     public float weakAttackScoreThreshold = 120f;
-
-    [Tooltip("Allow melee if it is genuinely competitive with the best spell option.")]
     public bool allowMeleeWhenAdjacent = true;
-
-    [Tooltip("Melee is chosen if it reaches this fraction of the best spell score.")]
-    [Range(0.5f, 1.5f)]
-    public float meleeScorePreferenceRatio = 0.9f;
+    [Range(0.5f, 1.5f)] public float meleeScorePreferenceRatio = 0.9f;
 
     private bool acting = false;
 
@@ -60,81 +50,77 @@ public class SimulatedPlayerController : MonoBehaviour
         if (spellController != null)
             spellController.RefreshValidTargets();
 
-        Vector2Int adjacentEnemyDirection = Vector2Int.zero;
-        bool hasAdjacentEnemy = false;
+        Vector2Int adjacentDir = Vector2Int.zero;
+        bool adjacentEnemy = false;
 
         if (movement != null)
-            hasAdjacentEnemy = movement.HasAdjacentEnemy(out adjacentEnemyDirection);
+            adjacentEnemy = movement.HasAdjacentEnemy(out adjacentDir);
 
-        int adjacentEnemyCount = CountAdjacentEnemies();
-        SpellDecision bestSpell = ChooseBestSpell();
-        float meleeScore = hasAdjacentEnemy ? CalculateMeleeScore() : 0f;
+        int adjacentCount = CountAdjacentEnemies();
+        SpellDecision spell = ChooseBestSpell();
+        float meleeScore = adjacentEnemy ? CalculateMeleeScore() : 0f;
 
-        bool actionTaken = false;
+        bool done = false;
 
-        // 1. Use a spell if it is clearly the best available option.
-        if (bestSpell.isValid && bestSpell.score > 0f)
+        if (spell.isValid && spell.score > 0f)
         {
-            bool spellClearlyBeatsMelee = !hasAdjacentEnemy || !allowMeleeWhenAdjacent || bestSpell.score > meleeScore * (1f / Mathf.Max(0.01f, meleeScorePreferenceRatio));
-            bool bestSpellIsWorthUsing = bestSpell.score >= weakAttackScoreThreshold || !hasAdjacentEnemy;
+            bool spellBeatsMelee = !adjacentEnemy || !allowMeleeWhenAdjacent || spell.score > meleeScore * (1f / Mathf.Max(0.01f, meleeScorePreferenceRatio));
+            bool spellWorth = spell.score >= weakAttackScoreThreshold || !adjacentEnemy;
 
-            if (spellClearlyBeatsMelee || bestSpellIsWorthUsing)
+            if (spellBeatsMelee || spellWorth)
             {
-                spellController.SetCurrentSpell(bestSpell.spellType);
+                spellController.SetCurrentSpell(spell.spellType);
 
-                if (spellController.HasValidTargetForSpell(bestSpell.spellType))
+                if (spellController.HasValidTargetForSpell(spell.spellType))
                 {
                     spellController.CastCurrentSpell();
-                    actionTaken = true;
+                    done = true;
                 }
             }
         }
 
-        // 2. If a good spell was not taken, use melee only when it is actually competitive.
-        if (!actionTaken && hasAdjacentEnemy && allowMeleeWhenAdjacent)
+        if (!done && adjacentEnemy && allowMeleeWhenAdjacent)
         {
-            bool meleeIsGoodChoice =
+            bool meleeOk =
                 meleeScore > 0f &&
                 (
-                    !bestSpell.isValid ||
-                    meleeScore >= bestSpell.score * meleeScorePreferenceRatio ||
-                    (bestSpell.resistance >= resistanceAvoidThreshold && bestSpell.hitCount <= 1)
+                    !spell.isValid ||
+                    meleeScore >= spell.score * meleeScorePreferenceRatio ||
+                    (spell.resistance >= resistanceAvoidThreshold && spell.hitCount <= 1)
                 );
 
-            if (meleeIsGoodChoice && movement != null)
+            if (meleeOk && movement != null)
             {
-                movement.PerformSimulatedAction(adjacentEnemyDirection);
-                actionTaken = true;
+                movement.PerformSimulatedAction(adjacentDir);
+                done = true;
             }
         }
 
-        // 3. If under real pressure and current attacks are weak, reposition to a safer tile.
-        if (!actionTaken)
+        if (!done)
         {
-            bool underPressure = adjacentEnemyCount >= adjacentThreatThreshold;
-            bool attacksAreWeak = !bestSpell.isValid || bestSpell.score < weakAttackScoreThreshold;
+            bool pressured = adjacentCount >= adjacentThreatThreshold;
+            bool weak = !spell.isValid || spell.score < weakAttackScoreThreshold;
 
-            if (underPressure && attacksAreWeak)
+            if (pressured && weak)
             {
-                Vector2Int retreatDirection = GetBestRetreatDirection();
+                Vector2Int retreat = GetBestRetreatDirection();
 
-                if (retreatDirection != Vector2Int.zero && movement != null)
+                if (retreat != Vector2Int.zero && movement != null)
                 {
-                    movement.PerformSimulatedAction(retreatDirection);
-                    actionTaken = true;
+                    movement.PerformSimulatedAction(retreat);
+                    done = true;
                 }
             }
         }
 
-        // 4. If there is still no worthwhile action, move towards the nearest enemy.
-        if (!actionTaken && movement != null)
+        if (!done && movement != null)
         {
-            Vector2Int moveDirection = GetMoveDirectionTowardsNearestEnemy();
+            Vector2Int dir = GetMoveDirectionTowardsNearestEnemy();
 
-            if (moveDirection != Vector2Int.zero)
+            if (dir != Vector2Int.zero)
             {
-                movement.PerformSimulatedAction(moveDirection);
-                actionTaken = true;
+                movement.PerformSimulatedAction(dir);
+                done = true;
             }
         }
 
@@ -161,33 +147,40 @@ public class SimulatedPlayerController : MonoBehaviour
 
     private SpellDecision BuildSpellDecision(SpellType spellType)
     {
+        SpellDecision result = new SpellDecision();
+        result.spellType = spellType;
+
         if (spellController == null)
-            return SpellDecision.Invalid(spellType);
+            return result;
 
         if (!spellController.HasValidTargetForSpell(spellType))
-            return SpellDecision.Invalid(spellType);
+            return result;
 
         int hitCount = spellController.GetBestHitCountForSpell(spellType);
         if (hitCount <= 0)
-            return SpellDecision.Invalid(spellType);
+            return result;
 
         float resistance = spellController.GetResistanceForSpell(spellType);
         int effectiveDamage = GetExpectedDamageForSpell(spellType);
 
         float score = effectiveDamage * hitCount;
 
-        // Reward multi-hit opportunities a bit more for AoE/chain spells.
         if (spellType == SpellType.LightningBolt && hitCount > 1)
             score += 20f * (hitCount - 1);
 
         if (spellType == SpellType.Fireball && hitCount > 1)
             score += 18f * (hitCount - 1);
 
-        // Penalise highly resisted single-target usage.
         if (resistance >= resistanceAvoidThreshold && hitCount <= 1)
             score *= 0.35f;
 
-        return new SpellDecision(spellType, true, score, hitCount, resistance, effectiveDamage);
+        result.isValid = true;
+        result.score = score;
+        result.hitCount = hitCount;
+        result.resistance = resistance;
+        result.expectedDamage = effectiveDamage;
+
+        return result;
     }
 
     private int GetExpectedDamageForSpell(SpellType spellType)
@@ -242,8 +235,6 @@ public class SimulatedPlayerController : MonoBehaviour
             damage = DynamicDifficultyManager.Instance.ApplyResistanceToDamage(DamageType.Melee, damage);
         }
 
-        // Small adjacency bonus so melee is considered when already in position,
-        // but it still has to be competitive.
         return damage + 10f;
     }
 
@@ -319,9 +310,9 @@ public class SimulatedPlayerController : MonoBehaviour
 
         EnemyGridMovement[] enemies = FindObjectsByType<EnemyGridMovement>(FindObjectsSortMode.None);
 
-        int adjacentThreat = 0;
-        int nearThreat = 0;
-        int nearestDistance = int.MaxValue;
+        int adjacent = 0;
+        int near = 0;
+        int nearest = int.MaxValue;
 
         foreach (EnemyGridMovement enemy in enemies)
         {
@@ -331,22 +322,12 @@ public class SimulatedPlayerController : MonoBehaviour
             Vector2Int enemyGrid = GridManager.Instance.WorldToGrid(enemy.transform.position);
             int distance = Mathf.Abs(enemyGrid.x - tile.x) + Mathf.Abs(enemyGrid.y - tile.y);
 
-            if (distance == 1)
-                adjacentThreat++;
-
-            if (distance <= 2)
-                nearThreat++;
-
-            if (distance < nearestDistance)
-                nearestDistance = distance;
+            if (distance == 1) adjacent++;
+            if (distance <= 2) near++;
+            if (distance < nearest) nearest = distance;
         }
 
-        // Prefer fewer adjacent enemies, then fewer nearby enemies,
-        // and only slightly prefer being not too far from combat.
-        return
-            (-adjacentThreat * 100f) +
-            (-nearThreat * 20f) +
-            (-nearestDistance * 2f);
+        return (-adjacent * 100f) + (-near * 20f) + (-nearest * 2f);
     }
 
     private Vector2Int GetMoveDirectionTowardsNearestEnemy()
@@ -379,8 +360,7 @@ public class SimulatedPlayerController : MonoBehaviour
         if (bestPath == null || bestPath.Count == 0)
             return Vector2Int.zero;
 
-        Vector2Int nextStep = bestPath[0];
-        return nextStep - playerGrid;
+        return bestPath[0] - playerGrid;
     }
 
     private struct SpellDecision
@@ -391,20 +371,5 @@ public class SimulatedPlayerController : MonoBehaviour
         public int hitCount;
         public float resistance;
         public int expectedDamage;
-
-        public SpellDecision(SpellType spellType, bool isValid, float score, int hitCount, float resistance, int expectedDamage)
-        {
-            this.spellType = spellType;
-            this.isValid = isValid;
-            this.score = score;
-            this.hitCount = hitCount;
-            this.resistance = resistance;
-            this.expectedDamage = expectedDamage;
-        }
-
-        public static SpellDecision Invalid(SpellType spellType)
-        {
-            return new SpellDecision(spellType, false, 0f, 0, 0f, 0);
-        }
     }
 }

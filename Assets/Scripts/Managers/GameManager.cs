@@ -323,8 +323,6 @@ public class GameManager : MonoBehaviour
         gameOver = true;
         runActive = false;
 
-        Debug.Log("GAME OVER - player died.");
-
         if (TurnManager.Instance != null)
             TurnManager.Instance.ResetTurns();
 
@@ -334,14 +332,9 @@ public class GameManager : MonoBehaviour
             batchHandled = MultiRunBatchController.Instance.HandleRunEnded();
 
         if (batchHandled)
-        {
-            Debug.Log("Batch controller will start the next run.");
             return;
-        }
 
-#if UNITY_EDITOR
-        Debug.Log("Run ended. No batch continuation active.");
-#else
+#if !UNITY_EDITOR
         Application.Quit();
 #endif
     }

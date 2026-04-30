@@ -5,7 +5,7 @@ public class DynamicDifficultyManager : MonoBehaviour
 {
     public static DynamicDifficultyManager Instance;
 
-    [Header("Legacy Compatibility")]
+    [Header("Legacy")]
     public float enemyHealthMultiplier = 1f;
 
     [Header("Base DDA Stat Adjustments")]
@@ -17,20 +17,12 @@ public class DynamicDifficultyManager : MonoBehaviour
     [Range(0f, 0.95f)] public float baseSingleResistanceCap = 0.30f;
 
     [Header("DDA Growth Over Time")]
-    [Tooltip("How much stronger DDA becomes per completed analysed run.")]
     public float strengthIncreasePerRun = 0.05f;
-
-    [Tooltip("Maximum extra strength multiplier added over time.")]
     public float maxExtraStrength = 0.75f;
-
-    [Tooltip("Also scale health/damage adjustments upward over time.")]
     public bool scaleStatAdjustmentsWithStrength = true;
 
     [Header("Run Analysis")]
-    [Tooltip("How many past runs to analyse each time.")]
     public int runsToAverage = 5;
-
-    [Tooltip("Only use DDA-enabled runs when analysing history. Keep this on for cleaner comparisons.")]
     public bool analyseOnlyDDARuns = true;
 
     [Header("Current Resistance Outputs")]
@@ -90,22 +82,19 @@ public class DynamicDifficultyManager : MonoBehaviour
         if (candidateRuns.Count == 0)
         {
             if (verboseLogging)
-                Debug.Log("DDA: No valid historical runs found after filtering. Using default adjustments.");
+                Debug.Log("DDA: No valid historical runs after filtering.");
             return;
         }
 
-        // Take the last N valid runs.
         int startIndex = Mathf.Max(0, candidateRuns.Count - runsToAverage);
         List<RunData> relevantRuns = candidateRuns.GetRange(startIndex, candidateRuns.Count - startIndex);
 
-        // Strength grows over time based on how many valid historical runs exist.
         int historicalRunCount = candidateRuns.Count;
         currentStrengthMultiplier = 1f + Mathf.Min(maxExtraStrength, historicalRunCount * strengthIncreasePerRun);
 
         currentTotalResistancePool = baseTotalResistancePool * currentStrengthMultiplier;
         currentSingleResistanceCap = baseSingleResistanceCap * currentStrengthMultiplier;
 
-        // Never allow the pooled total or single cap to become absurd.
         currentTotalResistancePool = Mathf.Clamp(currentTotalResistancePool, 0f, 0.90f);
         currentSingleResistanceCap = Mathf.Clamp(currentSingleResistanceCap, 0f, 0.75f);
 
@@ -165,7 +154,6 @@ public class DynamicDifficultyManager : MonoBehaviour
             damageStepDown *= currentStrengthMultiplier;
         }
 
-        // Stronger player performance -> stronger future enemies.
         if (averageStages >= 12f)
         {
             ddaHealthAdjustment += healthStepUp * 1.75f;
@@ -187,7 +175,6 @@ public class DynamicDifficultyManager : MonoBehaviour
             ddaDamageAdjustment -= damageStepDown;
         }
 
-        // Clamp to avoid extreme runaway scaling.
         ddaHealthAdjustment = Mathf.Clamp(ddaHealthAdjustment, -0.20f, 1.50f);
         ddaDamageAdjustment = Mathf.Clamp(ddaDamageAdjustment, -0.10f, 1.00f);
     }
@@ -218,23 +205,12 @@ public class DynamicDifficultyManager : MonoBehaviour
 
     public float GetResistanceForDamageType(DamageType damageType)
     {
-        switch (damageType)
-        {
-            case DamageType.Fire:
-                return fireResistanceAdjustment;
+        if (damageType == DamageType.Fire) return fireResistanceAdjustment;
+        if (damageType == DamageType.Ice) return iceResistanceAdjustment;
+        if (damageType == DamageType.Lightning) return lightningResistanceAdjustment;
+        if (damageType == DamageType.Melee) return meleeResistanceAdjustment;
 
-            case DamageType.Ice:
-                return iceResistanceAdjustment;
-
-            case DamageType.Lightning:
-                return lightningResistanceAdjustment;
-
-            case DamageType.Melee:
-                return meleeResistanceAdjustment;
-
-            default:
-                return 0f;
-        }
+        return 0f;
     }
 
     public int ApplyResistanceToDamage(DamageType damageType, int baseDamage)

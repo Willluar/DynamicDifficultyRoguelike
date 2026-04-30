@@ -44,58 +44,39 @@ public class PlayerSpellController : MonoBehaviour
         if (isCasting)
             return;
 
-        HandleSpellSwitchInput();
-        HandleTargetCycleInput();
-        HandleCastInput();
-    }
+        Keyboard kb = Keyboard.current;
+        if (kb == null) return;
 
-    private void HandleSpellSwitchInput()
-    {
-        Keyboard keyboard = Keyboard.current;
-        if (keyboard == null) return;
+        bool changed = false;
 
-        bool spellChanged = false;
-
-        if (keyboard.digit1Key.wasPressedThisFrame)
+        if (kb.digit1Key.wasPressedThisFrame)
         {
             currentSpell = iceBolt;
-            spellChanged = true;
+            changed = true;
         }
-        else if (keyboard.digit2Key.wasPressedThisFrame)
+        else if (kb.digit2Key.wasPressedThisFrame)
         {
             currentSpell = lightningBolt;
-            spellChanged = true;
+            changed = true;
         }
-        else if (keyboard.digit3Key.wasPressedThisFrame)
+        else if (kb.digit3Key.wasPressedThisFrame)
         {
             currentSpell = fireball;
-            spellChanged = true;
+            changed = true;
         }
 
-        if (spellChanged && currentSpell != null)
+        if (changed && currentSpell != null)
         {
             if (spellUI != null)
                 spellUI.SetSelectedSpell(currentSpell.spellType);
 
             RefreshValidTargets();
         }
-    }
 
-    private void HandleTargetCycleInput()
-    {
-        Keyboard keyboard = Keyboard.current;
-        if (keyboard == null) return;
-
-        if (keyboard.tabKey.wasPressedThisFrame)
+        if (kb.tabKey.wasPressedThisFrame)
             CycleTarget();
-    }
 
-    private void HandleCastInput()
-    {
-        Keyboard keyboard = Keyboard.current;
-        if (keyboard == null) return;
-
-        if (keyboard.spaceKey.wasPressedThisFrame)
+        if (kb.spaceKey.wasPressedThisFrame)
             CastCurrentSpell();
     }
 
@@ -141,17 +122,10 @@ public class PlayerSpellController : MonoBehaviour
 
     public DamageType GetDamageTypeForSpell(SpellType spellType)
     {
-        switch (spellType)
-        {
-            case SpellType.IceBolt:
-                return DamageType.Ice;
-            case SpellType.LightningBolt:
-                return DamageType.Lightning;
-            case SpellType.Fireball:
-                return DamageType.Fire;
-            default:
-                return DamageType.Melee;
-        }
+        if (spellType == SpellType.IceBolt) return DamageType.Ice;
+        if (spellType == SpellType.LightningBolt) return DamageType.Lightning;
+        if (spellType == SpellType.Fireball) return DamageType.Fire;
+        return DamageType.Melee;
     }
 
     public float GetResistanceForSpell(SpellType spellType)
@@ -197,7 +171,15 @@ public class PlayerSpellController : MonoBehaviour
 
             if (spell.spellType == SpellType.Fireball)
             {
-                hitCount = CountFireballHits(targetGrid, spell.splashRadius, allEnemies);
+                hitCount = 0;
+                foreach (EnemyGridMovement e in allEnemies)
+                {
+                    if (e == null) continue;
+                    Vector2Int eg = GridManager.Instance.WorldToGrid(e.transform.position);
+                    int d = Mathf.Abs(eg.x - targetGrid.x) + Mathf.Abs(eg.y - targetGrid.y);
+                    if (d <= spell.splashRadius)
+                        hitCount++;
+                }
             }
             else if (spell.spellType == SpellType.LightningBolt)
             {
@@ -248,36 +230,10 @@ public class PlayerSpellController : MonoBehaviour
 
     private SpellData GetSpellData(SpellType spellType)
     {
-        switch (spellType)
-        {
-            case SpellType.IceBolt:
-                return iceBolt;
-            case SpellType.LightningBolt:
-                return lightningBolt;
-            case SpellType.Fireball:
-                return fireball;
-            default:
-                return null;
-        }
-    }
-
-    private int CountFireballHits(Vector2Int targetGrid, int splashRadius, EnemyGridMovement[] allEnemies)
-    {
-        int hitCount = 0;
-
-        foreach (EnemyGridMovement enemy in allEnemies)
-        {
-            if (enemy == null)
-                continue;
-
-            Vector2Int enemyGrid = GridManager.Instance.WorldToGrid(enemy.transform.position);
-            int distance = Mathf.Abs(enemyGrid.x - targetGrid.x) + Mathf.Abs(enemyGrid.y - targetGrid.y);
-
-            if (distance <= splashRadius)
-                hitCount++;
-        }
-
-        return hitCount;
+        if (spellType == SpellType.IceBolt) return iceBolt;
+        if (spellType == SpellType.LightningBolt) return lightningBolt;
+        if (spellType == SpellType.Fireball) return fireball;
+        return null;
     }
 
     private int CountLightningHits(EnemyGridMovement primaryTarget, int chainRange, int chainCount, EnemyGridMovement[] allEnemies)

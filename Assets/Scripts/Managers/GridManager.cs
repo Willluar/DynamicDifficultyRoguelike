@@ -29,8 +29,6 @@ public class GridManager : MonoBehaviour
         BakeWallsIntoGrid();
     }
 
-    /* ---------------- Grid Utilities ---------------- */
-
     public Vector2Int WorldToGrid(Vector3 worldPos)
     {
         return new Vector2Int(
@@ -54,8 +52,6 @@ public class GridManager : MonoBehaviour
                pos.y >= 0 && pos.y < height;
     }
 
-    /* ---------------- Occupancy Control ---------------- */
-
     public void ClearOccupancy()
     {
         occupiedTiles.Clear();
@@ -77,7 +73,7 @@ public class GridManager : MonoBehaviour
     public void Register(GameObject obj)
     {
         Vector2Int pos = WorldToGrid(obj.transform.position);
-        occupiedTiles[pos] = obj; // overwrite-safe
+        occupiedTiles[pos] = obj;
     }
 
     public void Unregister(GameObject obj)
@@ -96,8 +92,6 @@ public class GridManager : MonoBehaviour
 
         Register(obj);
     }
-
-    /* ---------------- Wall Baking ---------------- */
 
     public void BakeWallsIntoGrid()
     {

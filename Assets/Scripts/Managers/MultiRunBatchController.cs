@@ -34,21 +34,15 @@ public class MultiRunBatchController : MonoBehaviour
 
         if (enableBatchRuns)
             batchActive = true;
-
-        Debug.Log($"Batch Controller: Run started. RunID={runID}, Started={runsStarted}, Completed={runsCompleted}, Target={totalRunsToExecute}");
     }
 
     public bool HandleRunEnded()
     {
         runsCompleted++;
 
-        Debug.Log($"Batch Controller: Run ended. Started={runsStarted}, Completed={runsCompleted}, Target={totalRunsToExecute}");
+        bool simActive = SimulationManager.Instance != null && SimulationManager.Instance.IsUsingSimulatedPlayer();
 
-        bool simulationActive =
-            SimulationManager.Instance != null &&
-            SimulationManager.Instance.IsUsingSimulatedPlayer();
-
-        if (!enableBatchRuns || !simulationActive)
+        if (!enableBatchRuns || !simActive)
         {
             batchActive = false;
             return false;
@@ -57,7 +51,6 @@ public class MultiRunBatchController : MonoBehaviour
         if (runsCompleted >= totalRunsToExecute)
         {
             batchActive = false;
-            Debug.Log("Batch Controller: Batch complete.");
             return false;
         }
 
@@ -82,10 +75,7 @@ public class MultiRunBatchController : MonoBehaviour
             yield return null;
 
         if (GameManager.Instance != null)
-        {
-            Debug.Log("Batch Controller: Starting next batch run.");
             GameManager.Instance.StartRun();
-        }
 
         waitingToStartNextRun = false;
     }
